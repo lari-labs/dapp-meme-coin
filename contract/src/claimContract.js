@@ -17,8 +17,6 @@ const makeNotifierFromTimer = (
 
 // https://docs.agoric.com/reference/zoe-api/zoe.html#e-zoe-getinstallationforinstance-instance
 
-const checkArray = (array) => (x) => array.indexOf(x) !== -1 ? x : false;
-
 /** @type {ContractStartFn} */
 const start = async (zcf, privateArgs) => {
   const { mint } = privateArgs;
@@ -45,6 +43,7 @@ const start = async (zcf, privateArgs) => {
       userSeat.getAmountAllocated('COINS', brand),
     );
     zcf.reallocate(mintSeat, userSeat);
+    userSeat.exit();
   };
   const publicFacet = Far('public facet', {
     getInvitationIssuer: () => zcf.getInvitationIssuer(),
