@@ -4,9 +4,21 @@
 import './install-ses-lockdown.js';
 import { E } from '@endo/eventual-send';
 import { observeNotifier } from '@agoric/notifier';
-import dappConstants from '../lib/constants.js';
 import { connect } from './connect.js';
 import '@agoric/wallet-connection/agoric-wallet-connection.js';
+const dappConstants = {
+  INSTANCE_BOARD_ID: 'board03523',
+  INSTALLATION_BOARD_ID: 'board01422',
+  INVITE_BRAND_BOARD_ID: 'board0074',
+  brandBoardIds: {
+    Token: 'board05024',
+  },
+  issuerBoardIds: {
+    Token: 'board03125',
+  },
+  BRIDGE_URL: 'http://127.0.0.1:8000',
+  API_URL: 'http://127.0.0.1:8000',
+};
 
 const {
   INVITE_BRAND_BOARD_ID,

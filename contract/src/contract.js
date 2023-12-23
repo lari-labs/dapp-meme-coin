@@ -1,8 +1,13 @@
 // @ts-check
 /* global harden */
 import '@agoric/zoe/exported.js';
-import { AmountMath } from '@agoric/ertp';
+import { AmountMath, AssetKind } from '@agoric/ertp';
 import { Far } from '@endo/marshal';
+import { start as startClaimContract } from './claimContract.js';
+const defaultOptions = ['MEMES', AssetKind.NAT, { decimalPlaces: 6 }];
+
+const makeZCFMintFunction = async (zcf, options = defaultOptions) =>
+  await zcf.makeZCFMint(...options);
 
 /**
  * This is a very simple contract that creates a new issuer and mints payments
@@ -22,7 +27,8 @@ import { Far } from '@endo/marshal';
 const start = async (zcf) => {
   // Create the internal token mint for a fungible digital asset. Note
   // that 'Tokens' is both the keyword and the allegedName.
-  const zcfMint = await zcf.makeZCFMint('Tokens');
+  const [zcfMint] = await Promise.all([zcf.makeZCFMint('Tokens')]);
+
   // AWAIT
 
   // Now that ZCF has saved the issuer, brand, and local amountMath, they
@@ -30,7 +36,7 @@ const start = async (zcf) => {
   const { issuer, brand } = zcfMint.getIssuerRecord();
 
   /** @type {OfferHandler} */
-  const mintPayment = (seat) => {
+  const mintMaxSupply = (seat) => {
     const amount = AmountMath.make(brand, 1000n);
     // Synchronously mint and allocate amount to seat.
     zcfMint.mintGains(harden({ Token: amount }), seat);
@@ -44,7 +50,9 @@ const start = async (zcf) => {
   const creatorFacet = Far('creatorFacet', {
     // The creator of the instance can send invitations to anyone
     // they wish to.
-    makeInvitation: () => zcf.makeInvitation(mintPayment, 'mint a payment'),
+    makeTokenMint: async (options = defaultOptions) =>
+      await makeZCFMintFunction(zcf, options),
+    makeInvitation: () => zcf.makeInvitation(mintMaxSupply, 'mint a payment'),
     getTokenIssuer: () => issuer,
   });
 
