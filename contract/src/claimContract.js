@@ -4,13 +4,13 @@ import { fromOnly, toOnly } from '@agoric/zoe/src/contractSupport';
 import { E } from '@endo/eventual-send';
 import { Far } from '@endo/marshal';
 import '@agoric/zoe/exported.js';
-import { M } from '@agoric/store';
+import CONSTANTS from './helpers/messages';
 
 /**
- * @param {TimerService} timerService
+ * @param {import('../../../../../agoric-sdk/packages/SwingSet/src/vats/timer/vat-timer').TimerService} timerService
  * @param {BigInt} delay
  * @param {BigInt} interval
- * @returns {Promise<Notifier<Timestamp>>}
+ * @returns {Promise<Notifier<import('../../../../../agoric-sdk/packages/SwingSet/tools/manual-timer').Timestamp>>}
  */
 const makeNotifierFromTimer = (
   timerService,
@@ -22,7 +22,6 @@ const zoeSeatHelpers = {
   getAmountAllocated: (keyword, brand, seat) =>
     seat.getAmountAllocated(keyword, brand),
 };
-// https://docs.agoric.com/reference/zoe-api/zoe.html#e-zoe-getinstallationforinstance-instance
 
 /**
  *
@@ -46,21 +45,14 @@ const start = async (zcf, privateArgs) => {
   // seperate minting from public facing contract
   /** @type {ZCFMint} */
   const zcfMint = await zcf.makeZCFMint('MEMECOINZ');
-
-  // const { mint } = await privateArgs;
-
   const { brand, issuer } = zcfMint.getIssuerRecord();
-
-  // add minimumTokensClaimable
   const baseAmount = AmountMath.make(brand, 1000n);
 
-  console.log({ baseAmount, brand, issuer });
+  // console.log({ baseAmount, brand, issuer });
 
   const { timeAuthority, eligibleWalletsStore } = await zcf.getTerms();
 
   const airdropMultiplierNotifier = await makeNotifierFromTimer(timeAuthority);
-
-  console.log('airdropMultiplierNotifier:::', airdropMultiplierNotifier);
 
   const creatorFacet = Far('creator facet', {
     getNotifier: () => airdropMultiplierNotifier,
@@ -71,12 +63,18 @@ const start = async (zcf, privateArgs) => {
   const makeClaimAirdropInvitation = () => {
     /** @type {OfferHandler} */
     const claimTokensHook = async (claimerSeat, claimerOfferArgs) => {
-      console.log({ claimerSeat, claimerOfferArgs, eligibleWalletsStore });
-
+      assert(
+        // @ts-ignore
+        await E(eligibleWalletsStore).has(claimerOfferArgs.pubkey),
+        CONSTANTS.CLAIM.INELIGIBLE_ACCOUNT_ERROR,
+      );
+      // TODO
+      // Logic for verifying public key of data signer.
+      //
       zcfMint.mintGains({ Airdrop: baseAmount }, claimerSeat);
       claimerSeat.exit();
       // logic for verifying public key against signature.
-      return `success ${baseAmount.value}`;
+      return CONSTANTS.CLAIM.OFFER_SUCCESS(baseAmount);
     };
     return zcf.makeInvitation(
       claimTokensHook,

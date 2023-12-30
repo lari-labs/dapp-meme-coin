@@ -4,26 +4,16 @@
 import { describe } from './prepare-riteway.js';
 import { test } from './prepare-test-env-ava.js';
 import path from 'path';
-
 import bundleSource from '@endo/bundle-source';
-
 import { E } from '@endo/eventual-send';
-import {
-  makeZoeForTest,
-  makeZoeKitForTest,
-} from '@agoric/zoe/tools/setup-zoe.js';
 import buildManualTimer from '@agoric/zoe/tools/manualTimer.js';
 import { makeScalarMapStore } from '@agoric/store';
-import { makeScalarBigWeakMapStore } from '@agoric/vat-data';
 import { AmountMath, AssetKind } from '@agoric/ertp';
-import { Far, isRemotable } from '@endo/marshal';
-import fakeVatAdmin, {
-  makeFakeVatAdmin,
-} from '@agoric/zoe/tools/fakeVatAdmin.js';
-import { makeAssert } from '@agoric/assert';
+import { Far } from '@endo/marshal';
 import { initContract } from './helpers.js';
-import { wallets } from './data/2kwallets.js';
+import { wallets as testWallets } from './data/2kwallets.js';
 
+const wallets = testWallets.map((x) => x.pubkey);
 const addNewKeyToMap = (map, val) => {
   map.init(
     val,
@@ -33,6 +23,7 @@ const addNewKeyToMap = (map, val) => {
   );
   return map;
 };
+
 const filename = new URL(import.meta.url).pathname;
 const dirname = path.dirname(filename);
 const rootContractPath = `${dirname}/../src/contract.js`;
@@ -68,14 +59,6 @@ describe('timerLogger', async (assert) => {
 
 const timer = buildManualTimer(timerLogger);
 
-const airdropMap = makeStoreFromArray(
-  makeScalarMapStore('airdrop answers map'),
-)([
-  { phrase: 'yankee-doodles', supply: 100n },
-  { phrase: 'password', supply: 100n },
-  { phrase: 'awesome123', supply: 100n },
-]); //?
-
 const getTestObjects = ({
   zoe,
   installation,
@@ -108,13 +91,8 @@ const makeAirdropCreator = async (timer) => {
     'MEMECOINZ',
     AssetKind.NAT,
   ]);
-  const eligibleWalletsStore = wallets.reduce(
-    addNewKeyToMap,
-    makeScalarMapStore('eligible wallets'),
-  );
 
   const { issuer: MEMECOINZIssuer } = await E(memeCoinzMint).getIssuerRecord();
-  console.log({ eligibleWalletsStore });
   return {
     MEMECOINZIssuer,
     MEMECOINZBrand: await E(MEMECOINZIssuer).getBrand(),
@@ -135,8 +113,10 @@ const makeAirdropCreator = async (timer) => {
         // @ts-ignore
         harden({
           timeAuthority: timer,
-          airdropMap,
-          eligibleWalletsStore: eligibleWalletsStore,
+          eligibleWalletsStore: wallets.reduce(
+            addNewKeyToMap,
+            makeScalarMapStore('eligible wallets'),
+          ),
         }),
         harden({ mint: memeCoinzMint }),
       );
@@ -147,16 +127,13 @@ const makeAirdropCreator = async (timer) => {
 
 test.before(async (t) => {
   const rootContractRefs = await makeAirdropCreator(timer);
-  console.log({ rootContractRefs });
   const claimContractInstance = await rootContractRefs.installClaimCode();
-  console.log({ claimContractInstance });
   t.context = {
     zoe: rootContractRefs.zoe,
     rootContractRefs: { ...rootContractRefs },
     claimContractInstance,
   };
-
-  t.log('Contract context::', t.context);
+  // t.log('Contract context::', t.context);
 });
 
 const handleCorrectGuess = async (t, claimFacet) => {
@@ -167,20 +144,12 @@ const handleCorrectGuess = async (t, claimFacet) => {
   );
 };
 
-test('eligible user story', async (t) => {
-  const ctx = t.context;
-
-  console.log({ ctx });
+test('eligibleAccountsStore operations', async (t) => {
   const {
-    zoe,
-    claimContractInstance: { publicFacet, creatorFacet },
-  } = ctx;
-
-  const issuer = await E(publicFacet).getIssuer();
-  const brand = await E(issuer).getBrand();
+    // @ts-ignore
+    claimContractInstance: { creatorFacet },
+  } = t.context;
   const store = await E(creatorFacet).getEligibleWalletsStore();
-
-  await timer.tick('inaugural timer tick');
 
   t.deepEqual(
     store.getSize(),
@@ -189,7 +158,7 @@ test('eligible user story', async (t) => {
   );
 
   t.deepEqual(
-    store.has('cosmos1lhnqdghgwy0gjz74pvsjh6v0mu0ua6ec33e7ul'),
+    store.has(wallets[20]),
     true,
     'store.has should return true on keys that are present.',
   );
@@ -201,63 +170,140 @@ test('eligible user story', async (t) => {
   );
 
   t.deepEqual(store.has(wallets[10]), true);
+});
+
+test('claim airdrop flow - ineligible user', async (t) => {
+  const {
+    claimContractInstance: { publicFacet },
+    zoe,
+  } = t.context;
+
+  const claimInvitation = await E(publicFacet).makeClaimAirdropInvitation();
+  const claimerSeat = await E(zoe).offer(
+    claimInvitation,
+    {},
+    {},
+    { pubkey: 'abcdefghijk' },
+  );
+
+  await t.throwsAsync(() => E(claimerSeat).getOfferResult(), {
+    message: 'Wallet associated with this public key is not eligible for claim',
+  });
+});
+
+test('claim airdrop flow - happy path', async (t) => {
+  const ctx = t.context;
+
+  const {
+    // @ts-ignore
+    zoe,
+    // @ts-ignore
+    claimContractInstance: { publicFacet, creatorFacet },
+  } = ctx;
+
+  const issuer = await E(publicFacet).getIssuer();
+  const brand = await E(issuer).getBrand();
+
+  await timer.tick('inaugural timer tick');
+
   //wallets.sort());
 
-  const bobsGuess = await E(publicFacet).makeClaimAirdropInvitation();
+  const claimInvitation = await E(publicFacet).makeClaimAirdropInvitation();
 
-  const x = await E(zoe).offer(bobsGuess, {}, {}, { address: '01' });
+  const claimAirdropActions = async (
+    t,
+    invitation,
+    pubkey,
+    issuer,
+    paymentKeyword,
+    expectedPayment,
+  ) => {
+    const getAmount = (payment) => E(issuer).getAmountOf(payment);
 
-  const getAmount = (payment) => E(issuer).getAmountOf(payment);
+    const claimerSeat = await E(zoe).offer(invitation, {}, {}, { pubkey });
+    t.deepEqual(
+      await E(claimerSeat).getOfferResult(),
+      'Successfully claimed 1000 tokens.',
+      'claimAirdrop offer result should return the correct success message.',
+    );
+    const payout = await E(claimerSeat).getPayout(paymentKeyword);
+    t.deepEqual(await getAmount(payout), expectedPayment);
+  };
 
-  const payout = await E(x).getPayout('Airdrop');
-
-  t.deepEqual(await getAmount(payout), AmountMath.make(brand, 1000n));
-
-  t.deepEqual(await E(x).getOfferResult(), await E(x).getPayouts());
-
-  const notifier = await E(creatorFacet).getNotifier();
-
-  // TODO
-  // [] demonstrate notifier is working properly
-  t.deepEqual(await notifier, {});
+  await claimAirdropActions(
+    t,
+    claimInvitation,
+    wallets[50],
+    issuer,
+    'Airdrop',
+    AmountMath.make(brand, 1000n),
+  );
 });
 
 test('airdrop multiplier logic', async (t) => {
   const ctx = t.context;
-
-  console.log({ ctx });
   const {
+    // @ts-ignore
     zoe,
+    // @ts-ignore
     claimContractInstance: { publicFacet, creatorFacet },
   } = ctx;
-  // 100_000_000n tokens / 100_000 wallets = 1_000n base tokens
+
   /**
-   * [TG]
-   * We should probably brainstorm on some sort of method, some sort of formal method for thi time-based multiplier. Multiplier equals X when Y is the total claimed at point of claim.
+   * TODO: Airdrop Multiplier
    *
-   * Tiers
+   * Configure makeTokenMultiplier to update its 'multiplier' value dynamically over time. Below are 2 examples demonstrating distribution schedules for 10 Million tokens over 4 weeks time.
    *
-   * Examples to come.....
+   * Distribution Schedule 1:
+   * 1. First 24 hours: 10,000 tokens
+   * 2. Day 2 to Day 7: 7,500 tokens
+   * 3. Day 7 to Day 14: 5,000 tokens
+   * 4. Day 14 to Day 21: 3,500 tokens
+   * 5. Day 21 to Day 28: 2,000 tokens
    *
+   *
+   * Distribution Schedule 2:
+   * 1. First 48 hours: 10,000 tokens
+   * 2. Day 3 to Day 10: 7,000 tokens
+   * 3. Day 10 to Day 17: 5,000 tokens
+   * 4. Day 17 to Day 24: 3,000 tokens
+   * 5. Day 24 to Day 31: 1,000 tokens
    *
    */
   const makeTokenMultiplier = () => {
+    const tiers = {
+      FIRST: 10_000n,
+      SECOND: 7_500n,
+      THIRD: 3_500n,
+      FOURTH: 2000n,
+    };
     let count = 0;
     return Far('Time-based Claim Multiplier', {
-      getCount() {
-        return count;
+      getMultiplier() {
+        return tiers.FIRST;
       },
-      wake(_t) {
+      wake(t) {
+        console.log('current timestamp::', t);
+        console.log('previous count::', count);
         count += 1;
+        console.log('updated count::', count);
       },
     });
   };
 
-  const multiplier = makeTokenMultiplier();
-  const issuer = await E(publicFacet).getIssuer();
-  const store = await E(creatorFacet).getNotifier();
+  const airdropClaimMultiplier = makeTokenMultiplier();
+  await E(timer).setWakeup(0n, makeTokenMultiplier());
+  await timer.tickN(10);
+  const repeater = E(timer).makeRepeater(7n, 1500n);
 
-  await timer.tick('inaugural timer tick');
+  const scheduledRepeater = E(repeater).schedule(airdropClaimMultiplier);
+
+  // TODO
+  // [] demonstrate notifier is working properly
+  t.deepEqual(
+    await E(timer)
+      .getCurrentTimestamp()
+      .then((t) => [t, airdropClaimMultiplier.getMultiplier()]),
+    {},
+  );
 });
-
-// [] Write internal contract logic for time-based multiplier.
