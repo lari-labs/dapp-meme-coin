@@ -3,7 +3,7 @@ import {
   makeScalarBigMapStore,
   makeScalarBigWeakMapStore,
 } from '@agoric/vat-data';
-import TestWallets from './walletData.js';
+import TestWallets from './data/walletData.js';
 const { twofifty } = TestWallets;
 
 const addNewKeyToMap = (map, val) => {

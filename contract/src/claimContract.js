@@ -1,7 +1,10 @@
+// @ts-check
 import { AmountMath } from '@agoric/ertp';
 import { fromOnly, toOnly } from '@agoric/zoe/src/contractSupport';
 import { E } from '@endo/eventual-send';
 import { Far } from '@endo/marshal';
+import '@agoric/zoe/exported.js';
+import { M } from '@agoric/store';
 
 /**
  * @param {TimerService} timerService
@@ -21,16 +24,39 @@ const zoeSeatHelpers = {
 };
 // https://docs.agoric.com/reference/zoe-api/zoe.html#e-zoe-getinstallationforinstance-instance
 
-/** @type {ContractStartFn} */
+/**
+ *
+ * @typedef {{
+ *    publicKey: string
+ * }} OfferArgs
+ *
+ * @typedef {{
+ *    getIssuer: () => Issuer<AssetKind>;
+ *    makeClaimAirdropInvitation: () => Promise<Invitation<string, OfferArgs>>;
+ * }} PublicFacet
+ */
+
+/**
+ * @type {ContractStartFn}
+ * @returns {ContractStartFnResult<{getIssuer,makeClaimAirdropInvitation}>}
+ */
 const start = async (zcf, privateArgs) => {
-  const { mint } = privateArgs;
+  // TODO
+  // pull this out into its own module (?)
+  // seperate minting from public facing contract
+  /** @type {ZCFMint} */
+  const zcfMint = await zcf.makeZCFMint('MEMECOINZ');
 
-  const { brand, issuer } = mint.getIssuerRecord();
+  // const { mint } = await privateArgs;
 
-  console.log({ issuer });
-  await zcf.saveIssuer(issuer, 'MEMECOIN');
+  const { brand, issuer } = zcfMint.getIssuerRecord();
 
-  const { timeAuthority, airdropMap, eligibleWalletsStore } = zcf.getTerms();
+  // add minimumTokensClaimable
+  const baseAmount = AmountMath.make(brand, 1000n);
+
+  console.log({ baseAmount, brand, issuer });
+
+  const { timeAuthority, eligibleWalletsStore } = await zcf.getTerms();
 
   const airdropMultiplierNotifier = await makeNotifierFromTimer(timeAuthority);
 
@@ -38,69 +64,32 @@ const start = async (zcf, privateArgs) => {
 
   const creatorFacet = Far('creator facet', {
     getNotifier: () => airdropMultiplierNotifier,
-    getEligibleWalletStore: () => eligibleWalletsStore,
+    getEligibleWalletsStore: () => eligibleWalletsStore,
+    checkEligibility: (key) => eligibleWalletsStore.has(key),
   });
-
-  const mintPrizeTokens = (attempt) => (userSeat) => {
-    const { supply } = airdropMap.get(attempt);
-
-    const paymentKeywordRecord = { COINS: AmountMath.make(brand, supply) };
-
-    // console.log('inside mintPrizetokens::', {
-    //   paymentKeywordRecord,
-    //   userSeat,
-    //   mint,
-    //   mintGains: mint.mintGains,
-    // });
-    const mintSeat = mint.mintGains(paymentKeywordRecord);
-    const transferParts = [[mintSeat, userSeat, paymentKeywordRecord]];
-    zcf.atomicRearrange(harden(transferParts));
-    // console.log(
-    //   'user amount allocated',
-    //   userSeat.getAmountAllocated('COINS', brand),
-    //   'zcfSeat allocated',
-    //   mintSeat.getAmountAllocated('COINS', brand),
-    // );
-
-    // userSeat.exit();
-  };
 
   const makeClaimAirdropInvitation = () => {
-    /** @param {ZCFSeat} claimerSeat */
-    const claimTokensHook = async (seat) => {
-      const {
-        want: { Coins: memeCoinsAmount },
-      } = seat.getProposal();
-      memeTokenMint.mintGains(harden({ Coins: memeCoinsAmount }), seat);
-      seat.exit();
-      return `success ${memeCoinsAmount.value}`;
+    /** @type {OfferHandler} */
+    const claimTokensHook = async (claimerSeat, claimerOfferArgs) => {
+      console.log({ claimerSeat, claimerOfferArgs, eligibleWalletsStore });
+
+      zcfMint.mintGains({ Airdrop: baseAmount }, claimerSeat);
+      claimerSeat.exit();
+      // logic for verifying public key against signature.
+      return `success ${baseAmount.value}`;
     };
-    return zcf.makeInvitation(claimTokensHook, 'claim airdrop');
+    return zcf.makeInvitation(
+      claimTokensHook,
+      'claim airdrop',
+      harden({ baseQuantity: baseAmount }),
+    );
   };
 
-  const makeClaimPriceInvitation = () => {
-    /** @param {ZCFSeat} claimerSeat */
-    const claimTokensHook = async (seat) => {
-      const {
-        want: { Coins: memeCoinsAmount },
-      } = seat.getProposal();
-      memeTokenMint.mintGains(harden({ Coins: memeCoinsAmount }), seat);
-      seat.exit();
-      return `success ${memeCoinsAmount.value}`;
-    };
-    return zcf.makeInvitation(claimTokensHook, 'claim airdrop');
-  };
-
-  const prizeWinnerFacet = Far('Prize Winner Facet', {
-    makeAmount: (x = 100n) => AmountMath.make(brand, x),
-    makeClaimPriceInvitation,
-  });
+  /** @type {PublicFacet} */
   const publicFacet = Far('public facet', {
     getIssuer: () => issuer,
     getInvitationIssuer: () => zcf.getInvitationIssuer(),
     makeClaimAirdropInvitation,
-    makeSecretPhraseGuess: (attempt) =>
-      airdropMap.has(attempt) ? prizeWinnerFacet : 'Incorrect guess!',
   });
 
   return harden({ creatorFacet, publicFacet });

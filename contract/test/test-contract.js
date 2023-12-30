@@ -16,7 +16,7 @@ import buildManualTimer from '@agoric/zoe/tools/manualTimer.js';
 import { makeScalarMapStore } from '@agoric/store';
 import { makeScalarBigWeakMapStore } from '@agoric/vat-data';
 import { AmountMath, AssetKind } from '@agoric/ertp';
-import { isRemotable } from '@endo/marshal';
+import { Far, isRemotable } from '@endo/marshal';
 import fakeVatAdmin, {
   makeFakeVatAdmin,
 } from '@agoric/zoe/tools/fakeVatAdmin.js';
@@ -93,7 +93,7 @@ const getTestObjects = ({
 test('WeakMap storage setup', async (t) => {
   const walletStore = wallets.reduce(
     addNewKeyToMap,
-    makeScalarBigWeakMapStore('eligible wallets'),
+    makeScalarMapStore('eligible wallets'),
   ); //?
   t.deepEqual(walletStore.has(wallets[10]), true);
 });
@@ -108,13 +108,13 @@ const makeAirdropCreator = async (timer) => {
     'MEMECOINZ',
     AssetKind.NAT,
   ]);
-  const eligibleWalletsStore = await wallets.reduce(
+  const eligibleWalletsStore = wallets.reduce(
     addNewKeyToMap,
-    makeScalarBigWeakMapStore('eligible wallets'),
+    makeScalarMapStore('eligible wallets'),
   );
 
   const { issuer: MEMECOINZIssuer } = await E(memeCoinzMint).getIssuerRecord();
-  console.log({ MEMECOINZIssuer });
+  console.log({ eligibleWalletsStore });
   return {
     MEMECOINZIssuer,
     MEMECOINZBrand: await E(MEMECOINZIssuer).getBrand(),
@@ -151,7 +151,8 @@ test.before(async (t) => {
   const claimContractInstance = await rootContractRefs.installClaimCode();
   console.log({ claimContractInstance });
   t.context = {
-    rootContractRefs,
+    zoe: rootContractRefs.zoe,
+    rootContractRefs: { ...rootContractRefs },
     claimContractInstance,
   };
 
@@ -161,68 +162,102 @@ test.before(async (t) => {
 const handleCorrectGuess = async (t, claimFacet) => {
   t.log('checking claim facet');
   assert(
-    claimFacet.makeClaimPriceInvitation,
-    'Airdrop Claim Facet should expose an invitation makeClaimPriceInvitation',
+    claimFacet.makeClaimAirdropInvitation,
+    'Airdrop Claim Facet should expose an invitation make',
   );
 };
 
 test('eligible user story', async (t) => {
+  const ctx = t.context;
+
+  console.log({ ctx });
   const {
-    claimContractInstance: { publicFacet },
-  } = t.context;
+    zoe,
+    claimContractInstance: { publicFacet, creatorFacet },
+  } = ctx;
 
-  const bobsGuess = await E(publicFacet).makeSecretPhraseGuess('password');
+  const issuer = await E(publicFacet).getIssuer();
+  const brand = await E(issuer).getBrand();
+  const store = await E(creatorFacet).getEligibleWalletsStore();
 
-  await handleCorrectGuess(t, bobsGuess);
+  await timer.tick('inaugural timer tick');
 
-  t.is(2, 3);
+  t.deepEqual(
+    store.getSize(),
+    2000,
+    'eligibleAddressStore should contain the correct number of values.',
+  );
+
+  t.deepEqual(
+    store.has('cosmos1lhnqdghgwy0gjz74pvsjh6v0mu0ua6ec33e7ul'),
+    true,
+    'store.has should return true on keys that are present.',
+  );
+
+  t.deepEqual(
+    store.has('cosmosooooohhhmygoooddd!!!!!!!!') === false,
+    true,
+    'store.has should throw on keys that do not exist.',
+  );
+
+  t.deepEqual(store.has(wallets[10]), true);
+  //wallets.sort());
+
+  const bobsGuess = await E(publicFacet).makeClaimAirdropInvitation();
+
+  const x = await E(zoe).offer(bobsGuess, {}, {}, { address: '01' });
+
+  const getAmount = (payment) => E(issuer).getAmountOf(payment);
+
+  const payout = await E(x).getPayout('Airdrop');
+
+  t.deepEqual(await getAmount(payout), AmountMath.make(brand, 1000n));
+
+  t.deepEqual(await E(x).getOfferResult(), await E(x).getPayouts());
+
+  const notifier = await E(creatorFacet).getNotifier();
+
+  // TODO
+  // [] demonstrate notifier is working properly
+  t.deepEqual(await notifier, {});
 });
 
-test('claimTokensContract:: publicFacet.makeSecretPhraseGuess', async (t) => {
-  const { rootContractRefs, claimContractInstance } = t.context;
-  const { installClaimCode, zoe, MEMECOINZBrand, MEMECOINZIssuer } =
-    rootContractRefs;
+test('airdrop multiplier logic', async (t) => {
+  const ctx = t.context;
+
+  console.log({ ctx });
+  const {
+    zoe,
+    claimContractInstance: { publicFacet, creatorFacet },
+  } = ctx;
+  // 100_000_000n tokens / 100_000 wallets = 1_000n base tokens
+  /**
+   * [TG]
+   * We should probably brainstorm on some sort of method, some sort of formal method for thi time-based multiplier. Multiplier equals X when Y is the total claimed at point of claim.
+   *
+   * Tiers
+   *
+   * Examples to come.....
+   *
+   *
+   */
+  const makeTokenMultiplier = () => {
+    let count = 0;
+    return Far('Time-based Claim Multiplier', {
+      getCount() {
+        return count;
+      },
+      wake(_t) {
+        count += 1;
+      },
+    });
+  };
+
+  const multiplier = makeTokenMultiplier();
+  const issuer = await E(publicFacet).getIssuer();
+  const store = await E(creatorFacet).getNotifier();
+
+  await timer.tick('inaugural timer tick');
 });
 
-// describe('claimTokensContract:: publicFacet.makeSecretPhraseGuess', async (assert) => {
-//   const { installClaimCode, zoe, MEMECOINZBrand, MEMECOINZIssuer } =
-//     await
-//   const {
-//     publicFacet: { makeSecretPhraseGuess, getInvitationIssuer },
-//   } = await installClaimCode();
-
-//   const memeCoinsAmount = (x) => AmountMath.make(MEMECOINZBrand, x);
-
-//   const invitationIssuer = getInvitationIssuer();
-
-//   const alicesGuess = makeSecretPhraseGuess('hello');
-//   assert({
-//     given: 'a key that does not exists in the airdropMap',
-//     should: 'return a string indicating incorrect guess.',
-//     actual: (await alicesGuess) === 'Incorrect guess!',
-//     expected: true,
-//   });
-//   const bobsGuess = await makeSecretPhraseGuess('password');
-
-//   assert({
-//     given: 'a key that exists in the airdropMap',
-//     should: 'return a live invitation payment',
-//     actual: bobsGuess,
-//     expected: true,
-//   });
-
-//   const bobSeat = await E(zoe).offer(bobsGuess, {
-//     want: { COINS: memeCoinsAmount(100n) },
-//     give: {},
-//   });
-
-//   const bobSeatPayout = await E(bobSeat).getPayout('COINS');
-
-//   const checkPayout = (payout) => E(MEMECOINZIssuer).getAmountOf(payout);
-//   assert({
-//     given: 'a call to E(zoe).offer(liveInvitation)',
-//     should: 'provide a payout of the correct amount',
-//     actual: await checkPayout(bobSeatPayout),
-//     expected: [{ COINS: AmountMath.make(invitationIssuer.getBrand(), 100n) }],
-//   });
-// });
+// [] Write internal contract logic for time-based multiplier.
