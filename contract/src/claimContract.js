@@ -50,22 +50,24 @@ const start = async (zcf, privateArgs) => {
 
   // console.log({ baseAmount, brand, issuer });
 
-  const { timeAuthority, eligibleWalletsStore } = await zcf.getTerms();
+  const { eligibleAccountsStore } = privateArgs;
+  const { timeAuthority } = await zcf.getTerms();
 
   const airdropMultiplierNotifier = await makeNotifierFromTimer(timeAuthority);
 
   const creatorFacet = Far('creator facet', {
     getNotifier: () => airdropMultiplierNotifier,
-    getEligibleWalletsStore: () => eligibleWalletsStore,
-    checkEligibility: (key) => eligibleWalletsStore.has(key),
+    getEligibleWalletsStore: () => E(eligibleAccountsStore),
+    checkEligibility: (key) => eligibleAccountsStore.has(key),
   });
 
   const makeClaimAirdropInvitation = () => {
     /** @type {OfferHandler} */
     const claimTokensHook = async (claimerSeat, claimerOfferArgs) => {
+      console.log({ claimerOfferArgs });
       assert(
         // @ts-ignore
-        await E(eligibleWalletsStore).has(claimerOfferArgs.pubkey),
+        await E(eligibleAccountsStore).has(claimerOfferArgs.pubkey),
         CONSTANTS.CLAIM.INELIGIBLE_ACCOUNT_ERROR,
       );
       // TODO

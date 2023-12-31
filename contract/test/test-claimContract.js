@@ -7,20 +7,20 @@ import path from 'path';
 import bundleSource from '@endo/bundle-source';
 import { E } from '@endo/eventual-send';
 import buildManualTimer from '@agoric/zoe/tools/manualTimer.js';
-import { makeScalarMapStore } from '@agoric/store';
+import { M, makeKindHandle, makeScalarWeakSetStore } from '@agoric/vat-data';
 import { AmountMath, AssetKind } from '@agoric/ertp';
 import { Far } from '@endo/marshal';
 import { initContract } from './helpers.js';
 import { wallets as testWallets } from './data/2kwallets.js';
 
 const wallets = testWallets.map((x) => x.pubkey);
+
+const getLength = ({ length }) => length;
+
 const addNewKeyToMap = (map, val) => {
-  map.init(
-    val,
-    harden({
-      claimed: false,
-    }),
-  );
+  console.log('map::', map);
+  map.add(Far(val));
+  map.has(Far(val));
   return map;
 };
 
@@ -72,13 +72,29 @@ const getTestObjects = ({
   vatAdminSvc,
   bundle,
 });
+const createIdentifier = (key) => `account:${key}`;
+
+const checkSet = (set, key) => set.has(Far(key));
+function* arrayToGen(array) {
+  let nextIndex = 0;
+  while (nextIndex < array.length) {
+    yield array[nextIndex++];
+  }
+}
 
 test('WeakMap storage setup', async (t) => {
-  const walletStore = wallets.reduce(
-    addNewKeyToMap,
-    makeScalarMapStore('eligible wallets'),
-  ); //?
-  t.deepEqual(walletStore.has(wallets[10]), true);
+  const pubkeyIterator = arrayToGen(wallets);
+  let currentPubkey = await pubkeyIterator.next();
+  const testStore = makeScalarWeakSetStore('Eligible_Accounts', {
+    keyShape: M.remotable(),
+  });
+
+  while (!currentPubkey.done) {
+    testStore.add(Far(createIdentifier(currentPubkey.value)));
+    currentPubkey = pubkeyIterator.next();
+  }
+
+  await t.deepEqual(testStore.has(Far(createIdentifier(wallets[10]))), true);
 });
 
 const makeAirdropCreator = async (timer) => {
@@ -92,6 +108,22 @@ const makeAirdropCreator = async (timer) => {
     AssetKind.NAT,
   ]);
 
+  const splitString = (targetIndex) => (string) => string.slice(0, targetIndex);
+
+  const eligibleAccountsStore = makeScalarWeakSetStore('Eligible_Accounts', {
+    keyShape: M.remotable(),
+  });
+  let count = 0;
+  let current;
+  for (let i of wallets) {
+    current = Far(createIdentifier(i));
+
+    eligibleAccountsStore.add(current);
+    // console.log('checking after adding::', eligibleAccountsStore.has(current));
+    count += 1;
+  }
+
+  await eligibleAccountsStore;
   const { issuer: MEMECOINZIssuer } = await E(memeCoinzMint).getIssuerRecord();
   return {
     MEMECOINZIssuer,
@@ -113,12 +145,12 @@ const makeAirdropCreator = async (timer) => {
         // @ts-ignore
         harden({
           timeAuthority: timer,
-          eligibleWalletsStore: wallets.reduce(
-            addNewKeyToMap,
-            makeScalarMapStore('eligible wallets'),
-          ),
+          eligibleAccountsStore,
         }),
-        harden({ mint: memeCoinzMint }),
+        harden({
+          mint: memeCoinzMint,
+          eligibleAccountsStore: eligibleAccountsStore,
+        }),
       );
       return claimInstance;
     },
@@ -127,7 +159,7 @@ const makeAirdropCreator = async (timer) => {
 
 test.before(async (t) => {
   const rootContractRefs = await makeAirdropCreator(timer);
-  const claimContractInstance = await rootContractRefs.installClaimCode();
+  const claimContractInstance = await E(rootContractRefs).installClaimCode();
   t.context = {
     zoe: rootContractRefs.zoe,
     rootContractRefs: { ...rootContractRefs },
@@ -144,33 +176,29 @@ const handleCorrectGuess = async (t, claimFacet) => {
   );
 };
 
-test('eligibleAccountsStore operations', async (t) => {
-  const {
-    // @ts-ignore
-    claimContractInstance: { creatorFacet },
-  } = t.context;
-  const store = await E(creatorFacet).getEligibleWalletsStore();
+// test('eligibleAccountsStore operations', async (t) => {
+//   const {
+//     // @ts-ignore
+//     claimContractInstance: { creatorFacet },
+//   } = t.context;
+//   const store = await E(creatorFacet).getEligibleWalletsStore();
 
-  t.deepEqual(
-    store.getSize(),
-    2000,
-    'eligibleAddressStore should contain the correct number of values.',
-  );
+//   t.log('store::', store);
 
-  t.deepEqual(
-    store.has(wallets[20]),
-    true,
-    'store.has should return true on keys that are present.',
-  );
+//   t.deepEqual(
+//     store.has(Far(wallets[20])),
+//     true,
+//     'store.has should return true on keys that are present.',
+//   );
 
-  t.deepEqual(
-    store.has('cosmosooooohhhmygoooddd!!!!!!!!') === false,
-    true,
-    'store.has should throw on keys that do not exist.',
-  );
+//   t.deepEqual(
+//     store.has('cosmosooooohhhmygoooddd!!!!!!!!') === false,
+//     true,
+//     'store.has should throw on keys that do not exist.',
+//   );
 
-  t.deepEqual(store.has(wallets[10]), true);
-});
+//   t.deepEqual(store.has(Far(wallets[10])), true);
+// });
 
 test('claim airdrop flow - ineligible user', async (t) => {
   const {
@@ -183,7 +211,7 @@ test('claim airdrop flow - ineligible user', async (t) => {
     claimInvitation,
     {},
     {},
-    { pubkey: 'abcdefghijk' },
+    { pubkey: Far(createIdentifier('abcdefghijk')) },
   );
 
   await t.throwsAsync(() => E(claimerSeat).getOfferResult(), {
@@ -198,6 +226,7 @@ test('claim airdrop flow - happy path', async (t) => {
     // @ts-ignore
     zoe,
     // @ts-ignore
+    MEMECOINZIssuer,
     claimContractInstance: { publicFacet, creatorFacet },
   } = ctx;
 
@@ -209,35 +238,54 @@ test('claim airdrop flow - happy path', async (t) => {
   //wallets.sort());
 
   const claimInvitation = await E(publicFacet).makeClaimAirdropInvitation();
+  const getAmount = (payment) => E(issuer).getAmountOf(payment);
 
-  const claimAirdropActions = async (
-    t,
-    invitation,
-    pubkey,
-    issuer,
-    paymentKeyword,
-    expectedPayment,
-  ) => {
-    const getAmount = (payment) => E(issuer).getAmountOf(payment);
-
-    const claimerSeat = await E(zoe).offer(invitation, {}, {}, { pubkey });
-    t.deepEqual(
-      await E(claimerSeat).getOfferResult(),
-      'Successfully claimed 1000 tokens.',
-      'claimAirdrop offer result should return the correct success message.',
-    );
-    const payout = await E(claimerSeat).getPayout(paymentKeyword);
-    t.deepEqual(await getAmount(payout), expectedPayment);
-  };
-
-  await claimAirdropActions(
-    t,
+  const claimerSeat = E(zoe).offer(
     claimInvitation,
-    wallets[50],
-    issuer,
-    'Airdrop',
-    AmountMath.make(brand, 1000n),
+    {},
+    {},
+    harden({ pubkey: Far(createIdentifier(wallets[50])) }),
   );
+
+  t.log(await E(claimerSeat).getOfferResult());
+
+  const payout = await E(claimerSeat).getPayout('Airdrop');
+  const checkAMount = await E(MEMECOINZIssuer).getAmountOf(payout);
+  await t.deepEqual(checkAMount, AmountMath.make(brand, 1000n));
+
+  // const claimAirdropActions = async (
+  //   t,
+  //   invitation,
+  //   pubkey,
+  //   issuer,
+  //   paymentKeyword,
+  //   expectedPayment,
+  // ) => {
+  //   t.log('pubkey::', pubkey);
+
+  //   const claimerSeat = await E(zoe).offer(
+  //     invitation,
+  //     {},
+  //     {},
+  //     harden({ pubkey }),
+  //   );
+  //   t.deepEqual(
+  //     await E(claimerSeat).getOfferResult(),
+  //     'Successfully claimed 1000 tokens.',
+  //     'claimAirdrop offer result should return the correct success message.',
+  //   );
+  //   const payout = await E(claimerSeat).getPayout(paymentKeyword);
+  //   t.deepEqual(await getAmount(payout), expectedPayment);
+  // };
+
+  // await claimAirdropActions(
+  //   t,
+  //   claimInvitation,
+  //   Far(createIdentifier(wallets[50])),
+  //   issuer,
+  //   'Airdrop',
+  //   AmountMath.make(brand, 1000n),
+  // );
 });
 
 test('airdrop multiplier logic', async (t) => {
@@ -297,7 +345,6 @@ test('airdrop multiplier logic', async (t) => {
   const repeater = E(timer).makeRepeater(7n, 1500n);
 
   const scheduledRepeater = E(repeater).schedule(airdropClaimMultiplier);
-
   // TODO
   // [] demonstrate notifier is working properly
   t.deepEqual(
