@@ -97,73 +97,27 @@ test('WeakMap storage setup', async (t) => {
   await t.deepEqual(testStore.has(Far(createIdentifier(wallets[10]))), true);
 });
 
-const makeAirdropCreator = async (timer) => {
-  const { zoe, installation, vatAdminState, vatAdminSvc, bundle } =
-    await initContract(rootContractPath, 'b1-airdrop-mint');
-
-  const { creatorFacet, instance } = await E(zoe).startInstance(installation);
-
-  const memeCoinzMint = await E(creatorFacet).makeTokenMint([
-    'MEMECOINZ',
-    AssetKind.NAT,
-  ]);
-
-  const splitString = (targetIndex) => (string) => string.slice(0, targetIndex);
-
-  const eligibleAccountsStore = makeScalarWeakSetStore('Eligible_Accounts', {
-    keyShape: M.remotable(),
-  });
-  let count = 0;
-  let current;
-  for (let i of wallets) {
-    current = Far(createIdentifier(i));
-
-    eligibleAccountsStore.add(current);
-    // console.log('checking after adding::', eligibleAccountsStore.has(current));
-    count += 1;
-  }
-
-  await eligibleAccountsStore;
-  const { issuer: MEMECOINZIssuer } = await E(memeCoinzMint).getIssuerRecord();
-  return {
-    MEMECOINZIssuer,
-    MEMECOINZBrand: await E(MEMECOINZIssuer).getBrand(),
-    memeCoinzMint,
-    zoe,
-    invitationIssuer: await E(zoe).getInvitationIssuer(),
-    installClaimCode: async () => {
-      const bundle = await bundleSource(claimContractPath);
-      // @ts-ignore
-      vatAdminState.installBundle('b1-claim-contract', bundle);
-      const claimInstallation = E(zoe).installBundleID('b1-claim-contract');
-
-      const claimInstance = await E(zoe).startInstance(
-        claimInstallation,
-        {
-          COINS: MEMECOINZIssuer,
-        },
-        // @ts-ignore
-        harden({
-          timeAuthority: timer,
-          eligibleAccountsStore,
-        }),
-        harden({
-          mint: memeCoinzMint,
-          eligibleAccountsStore: eligibleAccountsStore,
-        }),
-      );
-      return claimInstance;
-    },
-  };
-};
-
 test.before(async (t) => {
-  const rootContractRefs = await makeAirdropCreator(timer);
-  const claimContractInstance = await E(rootContractRefs).installClaimCode();
+  const rootContractRefs = await await initContract(
+    rootContractPath,
+    'b1-airdrop-mint',
+    claimContractPath,
+    wallets,
+    buildManualTimer(timerLogger),
+  );
+  const {
+    zoe,
+    installation,
+    vatAdminState,
+    vatAdminSvc,
+    bundle,
+    airdropInstance,
+  } = rootContractRefs;
+
   t.context = {
     zoe: rootContractRefs.zoe,
     rootContractRefs: { ...rootContractRefs },
-    claimContractInstance,
+    claimContractInstance: airdropInstance,
   };
   // t.log('Contract context::', t.context);
 });

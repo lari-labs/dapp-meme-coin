@@ -6,9 +6,12 @@ import { Far } from '@endo/marshal';
 import { start as startClaimContract } from './claimContract.js';
 const defaultOptions = ['MEMES', AssetKind.NAT, { decimalPlaces: 6 }];
 
-const makeZCFMintFunction = async (zcf, options = defaultOptions) =>
-  await zcf.makeZCFMint(...options);
+const makeZCFMintFunction = async (zcf, options = defaultOptions) => {
+  const mint = await zcf.makeZCFMint(...options);
 
+  const { issuer } = mint.getIssuerRecord();
+  return { mint, issuer, brand: issuer.getBrand() };
+};
 /**
  * @type {ContractStartFn}
  */

@@ -50,10 +50,9 @@ const start = async (zcf, privateArgs) => {
 
   // console.log({ baseAmount, brand, issuer });
 
-  const { eligibleAccountsStore } = privateArgs;
-  const { timeAuthority } = await zcf.getTerms();
+  const { eligibleAccountsStore, timerService } = privateArgs;
 
-  const airdropMultiplierNotifier = await makeNotifierFromTimer(timeAuthority);
+  const airdropMultiplierNotifier = await makeNotifierFromTimer(timerService);
 
   const creatorFacet = Far('creator facet', {
     getNotifier: () => airdropMultiplierNotifier,
