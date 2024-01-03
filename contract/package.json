@@ -33,6 +33,7 @@
     "@endo/marshal": "^0.6.9",
     "@agoric/notifier": "beta",
     "@agoric/store": "beta",
+    "@agoric/vat-data": "0.5.3-u13.0",
     "@agoric/zoe": "beta"
   },
   "ava": {
