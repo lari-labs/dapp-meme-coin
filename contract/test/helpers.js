@@ -1,5 +1,9 @@
 import { AssetKind } from '@agoric/ertp';
-import { makeScalarBigSetStore } from '@agoric/vat-data';
+import {
+  M,
+  makeScalarBigWeakSetStore as makeScalarBigSetStore,
+  makeScalarSetStore,
+} from '@agoric/vat-data';
 import { makeFakeVatAdmin } from '@agoric/zoe/tools/fakeVatAdmin.js';
 import buildManualTimer from '@agoric/zoe/tools/manualTimer.js';
 import {
@@ -8,20 +12,14 @@ import {
 } from '@agoric/zoe/tools/setup-zoe.js';
 import bundleSource from '@endo/bundle-source';
 import { E } from '@endo/eventual-send';
+import { withAmountUtils } from './amountUtils.js';
 function* gen(data) {
-  for (let i of data) {
+  for (let i of wdata) {
     yield i;
   }
 }
 
-const handleIt = (data) => {
-  let v = gen(data); //?
-  let mySet = makeScalarBigSetStore();
-  for (let i of v) {
-    mySet.add(i);
-  }
-  return mySet;
-};
+const createIdentifier = (key) => `account:${key}`;
 
 // const initializeAirdrop = (contractSource, bundleName = 'b1-token-airdrop', startConfig = {
 //   issuerKeywordRecord: {},
@@ -31,7 +29,13 @@ const handleIt = (data) => {
 //   const
 // }
 
+const createRemotable = (object) => Far(object);
+
+const formatKeysForStorage = (array) =>
+  array.map((x) => createRemotable(createIdentifier(x)));
+
 const initContract = async (
+  t,
   contractPath = rootContractPath,
   bundleName = 'b1-default-bundle-name',
   airdropBundle = {},
@@ -50,12 +54,31 @@ const initContract = async (
     issuer: memeCoinsIssuer,
     brand: memeCoinsBrand,
   } = await E(creatorFacet).makeTokenMint(['MEMECOINZ', AssetKind.NAT]);
-  console.log({ memeCoinzMint });
+
+  const memeCoinUtils = withAmountUtils({
+    mint: memeCoinzMint,
+    issuer: memeCoinsIssuer,
+    brand: memeCoinsBrand,
+  });
 
   vatAdminState.installBundle('b1-airdrop', await bundleSource(airdropBundle));
   const airdropInstallation = await E(zoe).installBundleID('b1-airdrop');
 
-  const eligibleAccountsStore = handleIt(addressData);
+  const eligibleAccountsStore = await makeScalarSetStore('Eligible_Accounts', {
+    keyShape: M.remotable(),
+  });
+
+  await eligibleAccountsStore.addAll(addressData);
+
+  addressData.reduce(
+    (acc, val) =>
+      t.deepEqual(
+        eligibleAccountsStore.has(val),
+        true,
+        `eligibleAccountStore given .has(${val})) shold return true`,
+      ),
+    [],
+  );
 
   const airdropInstance = await E(zoe).startInstance(
     airdropInstallation,
@@ -63,9 +86,18 @@ const initContract = async (
       AirdropTokens: memeCoinsIssuer,
     },
     {},
-    { mint: memeCoinzMint, eligibleAccountsStore, timerService: timer },
+    {
+      mint: memeCoinzMint,
+      brand: memeCoinsBrand,
+      issuer: memeCoinsIssuer,
+      eligibleAccountsStore,
+      timerService: timer,
+    },
   );
   return {
+    memeCoinUtils,
+    memeCoinsBrand,
+    memeCoinsIssuer,
     installation,
     vatAdminSvc,
     vatAdminState,
@@ -82,4 +114,4 @@ const contractFiles = {
   Claim: '../src/claimContract.js',
 };
 
-export { contractFiles, initContract };
+export { contractFiles, createIdentifier, initContract };
