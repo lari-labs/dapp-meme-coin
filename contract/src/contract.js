@@ -17,8 +17,6 @@ const makeZCFMintFunction = async (zcf, options = defaultOptions) => {
  */
 const start = async (zcf) => {
   const creatorFacet = Far('creatorFacet', {
-    // The creator of the instance can send invitations to anyone
-    // they wish to.
     makeTokenMint: async (options = defaultOptions) =>
       await makeZCFMintFunction(zcf, options),
   });
