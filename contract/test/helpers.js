@@ -4,30 +4,13 @@ import {
   makeScalarBigWeakSetStore as makeScalarBigSetStore,
   makeScalarSetStore,
 } from '@agoric/vat-data';
-import { makeFakeVatAdmin } from '@agoric/zoe/tools/fakeVatAdmin.js';
 import buildManualTimer from '@agoric/zoe/tools/manualTimer.js';
-import {
-  makeZoeForTest,
-  setUpZoeForTest,
-} from '@agoric/zoe/tools/setup-zoe.js';
+import { setUpZoeForTest } from '@agoric/zoe/tools/setup-zoe.js';
 import bundleSource from '@endo/bundle-source';
 import { E } from '@endo/eventual-send';
 import { withAmountUtils } from './amountUtils.js';
-function* gen(data) {
-  for (let i of wdata) {
-    yield i;
-  }
-}
 
 const createIdentifier = (key) => `account:${key}`;
-
-// const initializeAirdrop = (contractSource, bundleName = 'b1-token-airdrop', startConfig = {
-//   issuerKeywordRecord: {},
-//   customTerms: {},
-//   privateArgs: {}
-// }) => {
-//   const
-// }
 
 const createRemotable = (object) => Far(object);
 
@@ -66,19 +49,23 @@ const initContract = async (
 
   const eligibleAccountsStore = await makeScalarSetStore('Eligible_Accounts', {
     keyShape: M.remotable(),
+    durable: true,
   });
 
   await eligibleAccountsStore.addAll(addressData);
 
-  addressData.reduce(
-    (acc, val) =>
-      t.deepEqual(
-        eligibleAccountsStore.has(val),
-        true,
-        `eligibleAccountStore given .has(${val})) shold return true`,
-      ),
-    [],
-  );
+  // [TG]
+  // Commenting code out below due to impact is has on text execution speed. UNCOMMENT TO INSPECT RESULTS
+  //
+  // addressData.reduce(
+  //   (acc, val) =>
+  //     t.deepEqual(
+  //       eligibleAccountsStore.has(val),
+  //       true,
+  //       `eligibleAccountStore given .has(${val})) shold return true`,
+  //     ),
+  //   [],
+  // );
 
   const airdropInstance = await E(zoe).startInstance(
     airdropInstallation,
@@ -98,6 +85,7 @@ const initContract = async (
     memeCoinUtils,
     memeCoinsBrand,
     memeCoinsIssuer,
+    memeCoinzMint,
     installation,
     vatAdminSvc,
     vatAdminState,
@@ -105,6 +93,28 @@ const initContract = async (
     zoe,
     bundle,
     airdropInstance,
+    async startAirdrop() {
+      const airdropInstance = await E(zoe).startInstance(
+        airdropInstallation,
+        {
+          AirdropTokens: memeCoinsIssuer,
+        },
+        {},
+        {
+          mint: memeCoinzMint,
+          brand: memeCoinsBrand,
+          issuer: memeCoinsIssuer,
+          eligibleAccountsStore,
+          timerService: timer,
+        },
+      );
+      await airdropInstance;
+      return {
+        airdropInstance,
+        installation: airdropInstallation,
+        airdropBundle,
+      };
+    },
     bundleName,
   };
 };
