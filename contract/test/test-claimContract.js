@@ -118,7 +118,14 @@ test('WeakMap storage', async (t) => {
 //     rootContractPath,
 //     'b1-airdrop-mint',
 //     claimContractPath,
-//     wallets.map((x) => Far(createIdentifier(x))),
+//      wallets.map((x) =>
+//   Far(createIdentifier(x), {
+//     getKey() {
+//       return x;
+//     },
+//     claimed: () => false,
+//   }),
+// ),
 //     buildManualTimer(timerLogger),
 //   );
 //   const {
@@ -180,7 +187,14 @@ test('claim airdrop flow - ineligible user', async (t) => {
     rootContractPath,
     'b1-airdrop-mint',
     claimContractPath,
-    wallets.map((x) => Far(createIdentifier(x))),
+    wallets.map((x) =>
+      Far(createIdentifier(x), {
+        getKey() {
+          return x;
+        },
+        claimed: () => false,
+      }),
+    ),
     buildManualTimer(timerLogger),
   );
   const {
@@ -209,6 +223,121 @@ test('claim airdrop flow - ineligible user', async (t) => {
     message: 'Wallet associated with this public key is not eligible for claim',
   });
 });
+const createRemotableForValue = (value) => Far(createIdentifier(value));
+
+test('airdrop :: creator facet # mint tokens', async (t) => {
+  const rootContractRefs = await initContract(
+    t,
+    rootContractPath,
+    'b1-airdrop-mint',
+    claimContractPath,
+    wallets.map((x) =>
+      Far(createIdentifier(x), {
+        getKey() {
+          return x;
+        },
+        claimed: () => false,
+      }),
+    ),
+    buildManualTimer(timerLogger),
+  );
+  const {
+    zoe,
+    memeCoinsBrand,
+    memeCoinsIssuer,
+    installation,
+    vatAdminState,
+    vatAdminSvc,
+    bundle,
+    airdropInstance,
+    startAirdrop,
+  } = rootContractRefs;
+
+  const {
+    airdropInstance: { creatorFacet },
+  } = await startAirdrop();
+
+  const issuerDetails = await E(creatorFacet).getIssuerDetails();
+
+  t.deepEqual(
+    await issuerDetails,
+    {
+      brand: memeCoinsBrand,
+      issuer: memeCoinsIssuer,
+    },
+    'getIssuerDetails should return an object containng the correct issuer and brand.',
+  );
+  const airdropAdminMintInvitation = await E(
+    creatorFacet,
+  ).makeMintTokensInvitation();
+
+  const airdropAdminSeat = await E(zoe).offer(
+    airdropAdminMintInvitation,
+    {},
+    {},
+    { targetMintAmount: AmountMath.make(memeCoinsBrand, 10_000_000n) },
+  );
+
+  t.deepEqual(
+    await E(airdropAdminSeat).getOfferResult(),
+    `Mint success! 10000000 tokens have been minted and added to the internal contract seat.`,
+  );
+});
+
+test('airdrop :: creator facet # addEligibleAccounts', async (t) => {
+  const rootContractRefs = await initContract(
+    t,
+    rootContractPath,
+    'b1-airdrop-mint',
+    claimContractPath,
+    wallets.map((x) =>
+      Far(createIdentifier(x), {
+        getKey() {
+          return x;
+        },
+        claimed: () => false,
+      }),
+    ),
+    buildManualTimer(timerLogger),
+  );
+  const {
+    zoe,
+    memeCoinsBrand,
+    memeCoinsIssuer,
+    installation,
+    vatAdminState,
+    vatAdminSvc,
+    bundle,
+    airdropInstance,
+    startAirdrop,
+    keyPrefix,
+  } = rootContractRefs;
+
+  const {
+    airdropInstance: { creatorFacet },
+  } = await startAirdrop();
+
+  const issuerDetails = await E(creatorFacet).getIssuerDetails();
+
+  t.deepEqual(
+    await issuerDetails,
+    {
+      brand: memeCoinsBrand,
+      issuer: memeCoinsIssuer,
+    },
+    'getIssuerDetails should return an object containng the correct issuer and brand.',
+  );
+
+  const testAccounts = wallets.map((x) => Far(`${keyPrefix}${x}`));
+  const addAccountsReference = await E(creatorFacet).addEligibleAccounts(
+    testAccounts,
+  );
+
+  t.deepEqual(
+    await addAccountsReference,
+    'Successfully added 2000 eligible accounts. The store now contains 2000 values.',
+  );
+});
 
 test('claim airdrop flow - happy path', async (t) => {
   const rootContractRefs = await initContract(
@@ -216,7 +345,7 @@ test('claim airdrop flow - happy path', async (t) => {
     rootContractPath,
     'b1-airdrop-mint',
     claimContractPath,
-    wallets.map((x) => Far(createIdentifier(x))),
+    wallets,
     buildManualTimer(timerLogger),
   );
   const {
@@ -227,15 +356,19 @@ test('claim airdrop flow - happy path', async (t) => {
     bundle,
     airdropInstance,
     startAirdrop,
+    memeCoinsBrand,
     memeCoinsIssuer,
+    keyPrefix,
   } = rootContractRefs;
 
   const {
-    airdropInstance: { publicFacet },
+    airdropInstance: { publicFacet, creatorFacet },
   } = await startAirdrop();
 
-  const issuer = await E(publicFacet).getIssuer();
-  const brand = await E(issuer).getBrand();
+  const testAccounts = wallets.map((x) => Far(`${keyPrefix}${x}`));
+  const addAccountsReference = await E(creatorFacet).addEligibleAccounts(
+    testAccounts,
+  );
 
   await timer.tick('inaugural timer tick');
 
@@ -251,15 +384,19 @@ test('claim airdrop flow - happy path', async (t) => {
 
   const baseAmount = await E(claimFacet).getBaseAmount();
 
-  t.deepEqual(baseAmount, AmountMath.make(brand, 1000n));
+  t.deepEqual(baseAmount, AmountMath.make(memeCoinsBrand, 1000n));
 
-  const getAmount = (payment) => E(issuer).getAmountOf(payment);
+  const getAmount = (payment) => E(memeCoinsIssuer).getAmountOf(payment);
 
   const claimerSeat = await E(zoe).offer(
     claimInvitation,
     {},
     {},
-    harden({ pubkey: Far(createIdentifier(wallets[50])) }),
+    harden({
+      pubkey: keyPrefix.concat(
+        '037c236e9cbfd739e0d9e62d1af95179a6bb8d8c7939f112093c8823b270234f97',
+      ),
+    }),
   );
 
   t.deepEqual(
@@ -269,7 +406,7 @@ test('claim airdrop flow - happy path', async (t) => {
 
   const payout = await E(claimerSeat).getPayout('Airdrop');
   const checkAMount = await E(memeCoinsIssuer).getAmountOf(payout);
-  await t.deepEqual(checkAMount, AmountMath.make(brand, 1000n));
+  await t.deepEqual(checkAMount, AmountMath.make(memeCoinsBrand, 1000n));
 
   // const claimAirdropActions = async (
   //   t,
@@ -304,59 +441,6 @@ test('claim airdrop flow - happy path', async (t) => {
   //   'Airdrop',
   //   AmountMath.make(brand, 1000n),
   // );
-});
-
-test('airdrop :: creator facet', async (t) => {
-  const rootContractRefs = await initContract(
-    t,
-    rootContractPath,
-    'b1-airdrop-mint',
-    claimContractPath,
-    wallets.map((x) => Far(createIdentifier(x))),
-    buildManualTimer(timerLogger),
-  );
-  const {
-    zoe,
-    memeCoinsBrand,
-    memeCoinsIssuer,
-    installation,
-    vatAdminState,
-    vatAdminSvc,
-    bundle,
-    airdropInstance,
-    startAirdrop,
-  } = rootContractRefs;
-
-  const {
-    airdropInstance: { creatorFacet },
-  } = await startAirdrop();
-
-  const issuerDetails = await E(creatorFacet).getIssuerDetails();
-
-  t.deepEqual(
-    await issuerDetails,
-    {
-      brand: memeCoinsBrand,
-      issuer: memeCoinsIssuer,
-    },
-    'getIssuerDetails should return an object containng the correct issuer and brand.',
-  );
-
-  const airdropAdminMintInvitation = await E(
-    creatorFacet,
-  ).makeMintTokensInvitation();
-
-  const airdropAdminSeat = await E(zoe).offer(
-    airdropAdminMintInvitation,
-    {},
-    {},
-    { targetMintAmount: AmountMath.make(memeCoinsBrand, 10_000_000n) },
-  );
-
-  t.deepEqual(
-    await E(airdropAdminSeat).getOfferResult(),
-    `Mint success! 10000000 tokens have been minted and added to the internal contract seat.`,
-  );
 });
 
 // test('airdrop multiplier logic', async (t) => {

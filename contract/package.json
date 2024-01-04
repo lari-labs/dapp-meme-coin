@@ -29,12 +29,14 @@
     "@agoric/deploy-script-support": "beta",
     "@agoric/ertp": "beta",
     "@endo/eventual-send": "^0.14.8",
+    "@endo/exo": "1.0.1",
     "@endo/init": "^0.5.37",
     "@endo/marshal": "^0.6.9",
     "@agoric/notifier": "beta",
     "@agoric/store": "beta",
     "@agoric/vat-data": "0.5.3-u13.0",
-    "@agoric/zoe": "beta"
+    "@agoric/zoe": "beta",
+    "@agoric/zone": "0.2.3-u13.0"
   },
   "ava": {
     "files": [
