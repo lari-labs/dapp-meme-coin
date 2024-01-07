@@ -1,17 +1,7 @@
 import { M } from '@endo/patterns';
 import { makeScalarBigSetStore } from '@agoric/vat-data';
-import {
-  prepareExo,
-  prepareExoClassKit,
-  makeScalarBigMapStore,
-  provide,
-} from '@agoric/vat-data';
-import {
-  AmountShape,
-  AssetKind,
-  IssuerShape,
-  PaymentShape,
-} from '@agoric/ertp';
+import { prepareExoClassKit, provide } from '@agoric/vat-data';
+import { PaymentShape } from '@agoric/ertp';
 import { makeTracer } from '@agoric/internal';
 import { provideAll } from '@agoric/zoe/src/contractSupport/index.js';
 import { AIRDROP_ADMIN_MESSAGES } from './helpers/messages.js';
@@ -39,16 +29,12 @@ export const start = async (zcf, privateArgs, baggage) => {
   tracer('inside prepareAirdropKit');
   handleFirstIncarnation(baggage, 'airdropCampaignVersion');
 
-  const terms = zcf.getTerms();
-
-  tracer('terms:', terms);
+  // const terms = zcf.getTerms();
+  // tracer('terms:', terms);
   tracer('privateArgs:', privateArgs);
 
-  const { tokenName } = terms;
-
-  const { timerService, powers } = privateArgs;
-
   const {
+    claimPeriodEndTime,
     eligibleUsersStore,
     tokenIssuer,
     airdropBrand,
@@ -60,6 +46,8 @@ export const start = async (zcf, privateArgs, baggage) => {
       makeScalarBigSetStore('eligible users', {
         durable: true,
       }),
+    claimPeriodEndTime: () =>
+      !privateArgs.claimPeriodEndTime ? null : privateArgs.claimPeriodEndTime,
     tokenIssuer: () => privateArgs.tokenIssuer,
     airdropBrand: () => privateArgs.tokenBrand,
     airdropPurse: () => E(privateArgs.tokenIssuer).makeEmptyPurse(),
@@ -72,7 +60,17 @@ export const start = async (zcf, privateArgs, baggage) => {
     'Public Facet',
     {
       // getAirdropIssuer: M.call().returns(IssuerShape),
-      makeClaimTokenInvitation: M.call().returns(M.promise()),
+      claim: M.call(M.string()).returns(M.any()),
+      makeClaimTokenInvitation: M.call(M.string()).returns(M.promise()),
+    },
+    { sloppy: true },
+  );
+
+  const ClaimPowersI = M.interface(
+    'Claim Powers',
+    {
+      // getAirdropIssuer: M.call().returns(IssuerShape),
+      claim: M.call(M.any()).returns(M.string()),
     },
     { sloppy: true },
   );
@@ -87,6 +85,10 @@ export const start = async (zcf, privateArgs, baggage) => {
 
   const initState = (baggage) =>
     harden({
+      claimPeriodDetails: {
+        isActive: false,
+        claimPeriodEndTime,
+      },
       airdropIssuerDetails: {
         issuer: tokenIssuer,
         brand: airdropBrand,
@@ -97,23 +99,20 @@ export const start = async (zcf, privateArgs, baggage) => {
   const makeAirdrop = prepareExoClassKit(
     baggage,
     'Airdrop Campaign',
-    { creator: AdminI, public: PublicI },
-    (baggage) => {
-      const s = initState(baggage);
-      console.log('initState result::::', s);
-      const state = {
-        eligibleUsersStore,
-        adminSeat: zcf.makeEmptySeatKit().zcfSeat,
-        tokenIssuer: baggage.get('tokenIssuer'),
-        marshaller: baggage.get('marshaller'),
-        storageNode: baggage.get('storageNode'),
-        ...initState(baggage),
-      };
-      console.log({ state, keys: [...baggage.keys()] });
-      return state;
-    },
+    { creator: AdminI, public: PublicI, claim_powers: ClaimPowersI },
+    (baggage) => ({
+      eligibleUsersStore,
+      adminSeat: zcf.makeEmptySeatKit().zcfSeat,
+      tokenIssuer: baggage.get('tokenIssuer'),
+      marshaller: baggage.get('marshaller'),
+      storageNode: baggage.get('storageNode'),
+      ...initState(baggage),
+    }),
     {
       creator: {
+        getPurse() {
+          return this.state.airdropPurse;
+        },
         async depositToPurse(payment) {
           const depositFacet = await E(
             this.state.airdropPurse,
@@ -122,23 +121,14 @@ export const start = async (zcf, privateArgs, baggage) => {
         },
         addEligibleUsers(list) {
           const { eligibleUsersStore: store } = this.state;
-          console.log('addEligibleUsers:::', { length: list.length });
-          const res = store.getSize();
-          console.log('res', { res });
           store.addAll(list);
-          console.log('after addding', store.getSize());
           return AIRDROP_ADMIN_MESSAGES.ADD_ACCOUNTS_SUCCESS(list);
         },
         async depositAirdropPayment(payment) {
           const {
-            airdropPurse,
-            airdropIssuerDetails: { brand, issuer },
+            airdropIssuerDetails: { issuer },
           } = this.state;
-          console.log('inside depositAirdropPayment ####', {
-            issuer,
-            brand,
-            payment,
-          });
+
           assert(
             await E(issuer).isLive(payment),
             `Payment has failed liveliness check. This is either because it has been used already, or it is from the wrong issuer. Please check these details and try again`,
@@ -155,7 +145,31 @@ export const start = async (zcf, privateArgs, baggage) => {
           return this.state.issuer.makeEmptyPurse();
         },
       },
+      claim_powers: {
+        claim(userProof) {
+          // 1. lookup for key
+          assert(
+            this.state.eligibleUsersStore.has(userProof),
+            'Claim failed. Signature does not correspond to an address on Airdrop allowlist..',
+          );
+
+          // deposit from purse into a purse made for the user.
+          // ---------------------
+          // LOGIC GOES HERE
+          // ---------------------
+
+          this.state.eligibleUsersStore.delete(userProof);
+          // checkAfter -- this.state.eligibleUsersStore.has(userProof);
+
+          return 'Token claim success.';
+        },
+      },
       public: {
+        claim(x) {
+          // lookup can occur here before calling elsewhere.
+          // this could be an offerHandler for zcf.makeInvitation(claimHook)
+          return this.facets.claim_powers.claim(x);
+        },
         getAirdropTokenDetails() {
           return this.state.airdropIssuerDetails;
         },
