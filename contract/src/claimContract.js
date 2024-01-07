@@ -40,13 +40,15 @@ const zoeSeatHelpers = {
  * @returns {ContractStartFnResult<{getIssuer,makeClaimAirdropInvitation}>}
  */
 const start = async (zcf, privateArgs) => {
+  console.log('PRIVATE_ARGS::', privateArgs);
+  console.log('ZCF.getTerms() ===>', await zcf.getTerms());
   // TODO
   // pull this out into its own module (?)
   // seperate minting from public facing contract
   /** @type {ZCFMint} */
-  const zcfMint = await zcf.makeZCFMint('MEMECOINZ');
-  const { brand, issuer } = zcfMint.getIssuerRecord();
-  const baseAmount = AmountMath.make(brand, 1000n);
+  const { mint: zcfMint, issuer, brand } = await privateArgs;
+
+  // const baseAmount = AmountMath.make(brand, 1000n);
 
   // console.log({ baseAmount, brand, issuer });
 
@@ -68,9 +70,7 @@ const start = async (zcf, privateArgs) => {
         await E(eligibleWalletsStore).has(claimerOfferArgs.pubkey),
         CONSTANTS.CLAIM.INELIGIBLE_ACCOUNT_ERROR,
       );
-      // TODO
-      // Logic for verifying public key of data signer.
-      //
+
       zcfMint.mintGains({ Airdrop: baseAmount }, claimerSeat);
       claimerSeat.exit();
       // logic for verifying public key against signature.

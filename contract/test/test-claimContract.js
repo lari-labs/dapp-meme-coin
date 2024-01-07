@@ -92,7 +92,9 @@ const makeAirdropCreator = async (timer) => {
     AssetKind.NAT,
   ]);
 
-  const { issuer: MEMECOINZIssuer } = await E(memeCoinzMint).getIssuerRecord();
+  const { issuer: MEMECOINZIssuer, brand: MEMECOINZBrand } = await E(
+    memeCoinzMint,
+  ).getIssuerRecord();
   return {
     MEMECOINZIssuer,
     MEMECOINZBrand: await E(MEMECOINZIssuer).getBrand(),
@@ -118,14 +120,18 @@ const makeAirdropCreator = async (timer) => {
             makeScalarMapStore('eligible wallets'),
           ),
         }),
-        harden({ mint: memeCoinzMint }),
+        harden({
+          mint: memeCoinzMint,
+          issuer: MEMECOINZIssuer,
+          brand: MEMECOINZBrand,
+        }),
       );
       return claimInstance;
     },
   };
 };
 
-test.before(async (t) => {
+test.beforeEach(async (t) => {
   const rootContractRefs = await makeAirdropCreator(timer);
   const claimContractInstance = await rootContractRefs.installClaimCode();
   t.context = {
@@ -190,6 +196,36 @@ test('claim airdrop flow - ineligible user', async (t) => {
     message: 'Wallet associated with this public key is not eligible for claim',
   });
 });
+const claimAirdropActions = async (
+  t,
+  invitation,
+  pubkey,
+  issuer,
+  paymentKeyword,
+  expectedPayment,
+  zoe,
+) => {
+  t.log(
+    'running claimAirdropActions test ::: expectedPayment',
+    expectedPayment,
+  );
+  const getAmount = (payment) => E(issuer).getAmountOf(payment);
+
+  const claimerSeat = await E(zoe).offer(invitation, {}, {}, { pubkey });
+  t.deepEqual(
+    await E(claimerSeat).getOfferResult(),
+    'Successfully claimed 1000 tokens.',
+    'claimAirdrop offer result should return the correct success message.',
+  );
+  const payout = await E(claimerSeat).getPayout(paymentKeyword);
+
+  t.deepEqual(
+    await E(claimerSeat).hasExited(),
+    true,
+    'Invitation execution should result in user seat being exited.',
+  );
+  t.deepEqual(await getAmount(payout), expectedPayment);
+};
 
 test('claim airdrop flow - happy path', async (t) => {
   const ctx = t.context;
@@ -210,26 +246,6 @@ test('claim airdrop flow - happy path', async (t) => {
 
   const claimInvitation = await E(publicFacet).makeClaimAirdropInvitation();
 
-  const claimAirdropActions = async (
-    t,
-    invitation,
-    pubkey,
-    issuer,
-    paymentKeyword,
-    expectedPayment,
-  ) => {
-    const getAmount = (payment) => E(issuer).getAmountOf(payment);
-
-    const claimerSeat = await E(zoe).offer(invitation, {}, {}, { pubkey });
-    t.deepEqual(
-      await E(claimerSeat).getOfferResult(),
-      'Successfully claimed 1000 tokens.',
-      'claimAirdrop offer result should return the correct success message.',
-    );
-    const payout = await E(claimerSeat).getPayout(paymentKeyword);
-    t.deepEqual(await getAmount(payout), expectedPayment);
-  };
-
   await claimAirdropActions(
     t,
     claimInvitation,
@@ -237,73 +253,87 @@ test('claim airdrop flow - happy path', async (t) => {
     issuer,
     'Airdrop',
     AmountMath.make(brand, 1000n),
-  );
-});
-
-test('airdrop multiplier logic', async (t) => {
-  const ctx = t.context;
-  const {
-    // @ts-ignore
     zoe,
-    // @ts-ignore
-    claimContractInstance: { publicFacet, creatorFacet },
-  } = ctx;
-
-  /**
-   * TODO: Airdrop Multiplier
-   *
-   * Configure makeTokenMultiplier to update its 'multiplier' value dynamically over time. Below are 2 examples demonstrating distribution schedules for 10 Million tokens over 4 weeks time.
-   *
-   * Distribution Schedule 1:
-   * 1. First 24 hours: 10,000 tokens
-   * 2. Day 2 to Day 7: 7,500 tokens
-   * 3. Day 7 to Day 14: 5,000 tokens
-   * 4. Day 14 to Day 21: 3,500 tokens
-   * 5. Day 21 to Day 28: 2,000 tokens
-   *
-   *
-   * Distribution Schedule 2:
-   * 1. First 48 hours: 10,000 tokens
-   * 2. Day 3 to Day 10: 7,000 tokens
-   * 3. Day 10 to Day 17: 5,000 tokens
-   * 4. Day 17 to Day 24: 3,000 tokens
-   * 5. Day 24 to Day 31: 1,000 tokens
-   *
-   */
-  const makeTokenMultiplier = () => {
-    const tiers = {
-      FIRST: 10_000n,
-      SECOND: 7_500n,
-      THIRD: 3_500n,
-      FOURTH: 2000n,
-    };
-    let count = 0;
-    return Far('Time-based Claim Multiplier', {
-      getMultiplier() {
-        return tiers.FIRST;
-      },
-      wake(t) {
-        console.log('current timestamp::', t);
-        console.log('previous count::', count);
-        count += 1;
-        console.log('updated count::', count);
-      },
-    });
-  };
-
-  const airdropClaimMultiplier = makeTokenMultiplier();
-  await E(timer).setWakeup(0n, makeTokenMultiplier());
-  await timer.tickN(10);
-  const repeater = E(timer).makeRepeater(7n, 1500n);
-
-  const scheduledRepeater = E(repeater).schedule(airdropClaimMultiplier);
-
-  // TODO
-  // [] demonstrate notifier is working properly
-  t.deepEqual(
-    await E(timer)
-      .getCurrentTimestamp()
-      .then((t) => [t, airdropClaimMultiplier.getMultiplier()]),
-    {},
   );
+
+  const invitationTwo = await E(publicFacet).makeClaimAirdropInvitation();
+  // await claimAirdropActions(
+  //   t,
+  //   invitationTwo,
+  //   wallets[40],
+  //   issuer,
+  //   'Airdrop',
+  //   AmountMath.make(brand, 1000n),
+  //   zoe,
+  // );
 });
+
+test.todo('airdrop multiplier logic');
+
+// test('airdrop multiplier logic', async (t) => {
+//   const ctx = t.context;
+//   const {
+//     // @ts-ignore
+//     zoe,
+//     // @ts-ignore
+//     claimContractInstance: { publicFacet, creatorFacet },
+//   } = ctx;
+
+//   /**
+//    * TODO: Airdrop Multiplier
+//    *
+//    * Configure makeTokenMultiplier to update its 'multiplier' value dynamically over time. Below are 2 examples demonstrating distribution schedules for 10 Million tokens over 4 weeks time.
+//    *
+//    * Distribution Schedule 1:
+//    * 1. First 24 hours: 10,000 tokens
+//    * 2. Day 2 to Day 7: 7,500 tokens
+//    * 3. Day 7 to Day 14: 5,000 tokens
+//    * 4. Day 14 to Day 21: 3,500 tokens
+//    * 5. Day 21 to Day 28: 2,000 tokens
+//    *
+//    *
+//    * Distribution Schedule 2:
+//    * 1. First 48 hours: 10,000 tokens
+//    * 2. Day 3 to Day 10: 7,000 tokens
+//    * 3. Day 10 to Day 17: 5,000 tokens
+//    * 4. Day 17 to Day 24: 3,000 tokens
+//    * 5. Day 24 to Day 31: 1,000 tokens
+//    *
+//    */
+//   const makeTokenMultiplier = () => {
+//     const tiers = {
+//       FIRST: 10_000n,
+//       SECOND: 7_500n,
+//       THIRD: 3_500n,
+//       FOURTH: 2000n,
+//     };
+//     let count = 0;
+//     return Far('Time-based Claim Multiplier', {
+//       getMultiplier() {
+//         return tiers.FIRST;
+//       },
+//       wake(t) {
+//         console.log('current timestamp::', t);
+//         console.log('previous count::', count);
+//         count += 1;
+//         console.log('updated count::', count);
+//       },
+//     });
+//   };
+
+//   const airdropClaimMultiplier = makeTokenMultiplier();
+//   await E(timer).setWakeup(0n, makeTokenMultiplier());
+//   await timer.tickN(10);
+//   const repeater = E(timer).makeRepeater(7n, 1500n);
+
+//   const scheduledRepeater = E(repeater).schedule(airdropClaimMultiplier);
+
+//   // TODO
+//   // [] demonstrate notifier is working properly
+//   t.deepEqual(
+//     await E(timer)
+//       .getCurrentTimestamp()
+//       .then((t) => [t, airdropClaimMultiplier.getMultiplier()]),
+//     {},
+//   );
+// });

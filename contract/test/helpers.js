@@ -1,8 +1,5 @@
 import { makeFakeVatAdmin } from '@agoric/zoe/tools/fakeVatAdmin.js';
-import {
-  makeZoeForTest,
-  setUpZoeForTest,
-} from '@agoric/zoe/tools/setup-zoe.js';
+import { setUpZoeForTest } from '@agoric/zoe/tools/setup-zoe.js';
 import bundleSource from '@endo/bundle-source';
 import { E } from '@endo/eventual-send';
 

@@ -3,58 +3,63 @@
 import '@agoric/zoe/exported.js';
 import { AmountMath, AssetKind } from '@agoric/ertp';
 import { Far } from '@endo/marshal';
+import { provideAll } from '@agoric/zoe/src/contractSupport/durability.js';
 import { start as startClaimContract } from './claimContract.js';
+import { M } from '@endo/patterns';
+import { prepareExoClass, provide } from '@agoric/vat-data';
 const defaultOptions = ['MEMES', AssetKind.NAT, { decimalPlaces: 6 }];
 
 const makeZCFMintFunction = async (zcf, options = defaultOptions) =>
   await zcf.makeZCFMint(...options);
 
+const handleIncarnation = (baggage, key) =>
+  !baggage.has(key) ? baggage.init(key, 0) : baggage.set(baggage.get(key) + 1);
+
 /**
- * @type {ContractStartFn}
+ * @type {ContractMeta}
  */
-const start = async (zcf) => {
-  // Create the internal token mint for a fungible digital asset. Note
-  // that 'Tokens' is both the keyword and the allegedName.
-  const [zcfMint] = await Promise.all([zcf.makeZCFMint('Tokens')]);
+export const meta = {
+  upgradability: 'canUpgrade',
+  privateArgsShape: M.splitRecord({
+    timerService: M.eref(M.remotable('TimerService')),
+    powers: {
+      storageNode: M.remotable('StorageNode'),
+      marshaller: M.remotable('Marshaller'),
+    },
+  }),
+};
 
-  // AWAIT
+const start = async (zcf, _, baggage) => {
+  const { tokenName } = zcf.getTerms();
+  assert(tokenName, 'Contract must be given a tokenName property.');
 
-  // Now that ZCF has saved the issuer, brand, and local amountMath, they
-  // can be accessed synchronously.
+  const { zcfMint } = await provideAll(baggage, {
+    zcfMint: () => zcf.makeZCFMint(tokenName),
+  });
+
   const { issuer, brand } = zcfMint.getIssuerRecord();
+  // const creatorFacet = Far('creatorFacet', {
+  //   makeTokenMint: async (options = defaultOptions) =>
+  //     await makeZCFMintFunction(zcf, options),
+  // });
 
-  /** @type {OfferHandler} */
-  const mintMaxSupply = (seat) => {
-    const amount = AmountMath.make(brand, 1000n);
-    // Synchronously mint and allocate amount to seat.
-    zcfMint.mintGains(harden({ Token: amount }), seat);
-    // Exit the seat so that the user gets a payout.
-    seat.exit();
-    // Since the user is getting the payout through Zoe, we can
-    // return anything here. Let's return some helpful instructions.
-    return 'Offer completed. You should receive a payment from Zoe';
-  };
-
-  const creatorFacet = Far('creatorFacet', {
-    // The creator of the instance can send invitations to anyone
-    // they wish to.
-    startClaimContract,
-    makeTokenMint: async (options = defaultOptions) =>
-      await makeZCFMintFunction(zcf, options),
-    makeInvitation: () => zcf.makeInvitation(mintMaxSupply, 'mint a payment'),
-    getTokenIssuer: () => issuer,
-  });
-
-  const publicFacet = Far('publicFacet', {
-    // Make the token issuer public. Note that only the mint can
-    // make new digital assets. The issuer is ok to make public.
-    getTokenIssuer: () => issuer,
-  });
-
-  // Return the creatorFacet to the creator, so they can make
-  // invitations for others to get payments of tokens. Publish the
-  // publicFacet.
-  return harden({ creatorFacet, publicFacet });
+  prepareExoClass(
+    baggage,
+    'ZCF Token Mint',
+    undefined,
+    () => ({
+      tokenName,
+    }),
+    {
+      getIssuer() {
+        return issuer;
+      },
+    },
+  );
+  const creatorFacet = provide(baggage, 'ERTP Mint', () =>
+    zcf.makeZCFMint(zcf.getTerms().tokenName),
+  );
+  return harden({ creatorFacet });
 };
 
 harden(start);
