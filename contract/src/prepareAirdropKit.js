@@ -1,20 +1,31 @@
 import { M } from '@endo/patterns';
 import { makeScalarBigSetStore } from '@agoric/vat-data';
 import { prepareExoClassKit, provide } from '@agoric/vat-data';
-import { PaymentShape } from '@agoric/ertp';
+import {
+  IssuerShape,
+  PaymentShape,
+  BrandShape,
+  PurseShape,
+  AmountMath,
+} from '@agoric/ertp';
 import { makeTracer } from '@agoric/internal';
 import { provideAll } from '@agoric/zoe/src/contractSupport/index.js';
-import { AIRDROP_ADMIN_MESSAGES } from './helpers/messages.js';
+import { AIRDROP_ADMIN_MESSAGES, CLAIM_MESSAGES } from './helpers/messages.js';
 import { E } from '@endo/eventual-send';
 
 const tracer = makeTracer('Airdrop airdropCampaign');
 /** @type {airdropCampaignMeta} */
 export const meta = {
   upgradability: 'canUpgrade',
-  // privateArgsShape: M.splitRecord({
-  //   timerService: M.eref(M.remotable('TimerService')),
-  //     marshaller: M.remotable('Marshaller'),
-  // }),
+  privateArgsShape: M.splitRecord({
+    tokenIssuer: IssuerShape,
+    tokenBrand: BrandShape,
+    powers: {
+      marshaller: M.remotable('Marshaller'),
+      storageNode: M.remotable('storageNode'),
+      timerService: M.eref(M.remotable('TimerService')),
+    },
+  }),
 };
 
 harden(meta);
@@ -24,13 +35,35 @@ const handleFirstIncarnation = (baggage, key) =>
     ? baggage.init(key, 1)
     : baggage.set(key, baggage.get(key) + 1);
 
+const AirdropIssuerDetailsShape = harden({
+  brand: BrandShape,
+  issuer: IssuerShape,
+});
+
+const initState = (zcf) => (baggage) =>
+  harden({
+    eligibleUsersStore: baggage.get('eligibleUsersStore'),
+    adminSeat: zcf.makeEmptySeatKit().zcfSeat,
+    marshaller: baggage.get('marshaller'),
+    storageNode: baggage.get('storageNode'),
+    claimPeriodDetails: {
+      isActive: false,
+      claimPeriodEndTime: !baggage.has('claimPeriodEndTime')
+        ? null
+        : baggage.get('claimPeriodEndTime'),
+    },
+    airdropIssuerDetails: {
+      issuer: baggage.get('tokenIssuer'),
+      brand: baggage.get('airdropBrand'),
+    },
+    airdropPurse: baggage.get('airdropPurse'),
+  });
+
 export const start = async (zcf, privateArgs, baggage) => {
   // TODO handle fail cases?
   tracer('inside prepareAirdropKit');
   handleFirstIncarnation(baggage, 'airdropCampaignVersion');
 
-  // const terms = zcf.getTerms();
-  // tracer('terms:', terms);
   tracer('privateArgs:', privateArgs);
 
   const {
@@ -55,60 +88,37 @@ export const start = async (zcf, privateArgs, baggage) => {
     storageNode: () => privateArgs.powers.storageNode,
   });
 
-  console.log({ tokenIssuer });
-  const PublicI = M.interface(
-    'Public Facet',
-    {
-      // getAirdropIssuer: M.call().returns(IssuerShape),
-      claim: M.call(M.string()).returns(M.any()),
-      makeClaimTokenInvitation: M.call(M.string()).returns(M.promise()),
-    },
-    { sloppy: true },
-  );
-
-  const ClaimPowersI = M.interface(
-    'Claim Powers',
-    {
-      // getAirdropIssuer: M.call().returns(IssuerShape),
-      claim: M.call(M.any()).returns(M.string()),
-    },
-    { sloppy: true },
-  );
-  const AdminI = M.interface(
-    'Airdrop Creator',
-    {
-      depositAirdropPayment: M.call(PaymentShape).returns(M.promise()),
-      addEligibleUsers: M.call(M.arrayOf(M.string())).returns(M.string()),
-    },
-    { sloppy: true },
-  );
-
-  const initState = (baggage) =>
-    harden({
-      claimPeriodDetails: {
-        isActive: false,
-        claimPeriodEndTime,
-      },
-      airdropIssuerDetails: {
-        issuer: tokenIssuer,
-        brand: airdropBrand,
-      },
-      airdropPurse,
-    });
-
+  /**
+   * @typedef {object} AirdropIssuerDetails
+   * @prop {Issuer} issuer
+   * @prop {Brand} brand
+   */
   const makeAirdrop = prepareExoClassKit(
     baggage,
-    'Airdrop Campaign',
-    { creator: AdminI, public: PublicI, claim_powers: ClaimPowersI },
-    (baggage) => ({
-      eligibleUsersStore,
-      adminSeat: zcf.makeEmptySeatKit().zcfSeat,
-      tokenIssuer: baggage.get('tokenIssuer'),
-      marshaller: baggage.get('marshaller'),
-      storageNode: baggage.get('storageNode'),
-      ...initState(baggage),
-    }),
+    'Airdrop Campaign Kit',
     {
+      creator: M.interface('Creator Facet', {
+        getPurse: M.call().returns(PurseShape),
+        depositToPurse: M.call(PaymentShape).returns(M.promise()),
+        depositAirdropPayment: M.call(PaymentShape).returns(M.promise()),
+        addEligibleUsers: M.call(M.arrayOf(M.string())).returns(M.string()),
+      }),
+      public: M.interface('Public Facet', {
+        // getAirdropIssuer: M.call().returns(IssuerShape),
+        getAirdropTokenDetails: M.call().returns(AirdropIssuerDetailsShape),
+        claim: M.call(M.string()).returns(M.any()),
+      }),
+      helpers: M.interface('Helper Facet', {
+        createPurse: M.call().returns(PurseShape),
+      }),
+    },
+    initState(zcf),
+    {
+      helpers: {
+        createPurse() {
+          return this.state.issuer.makeEmptyPurse();
+        },
+      },
       creator: {
         getPurse() {
           return this.state.airdropPurse;
@@ -118,6 +128,7 @@ export const start = async (zcf, privateArgs, baggage) => {
             this.state.airdropPurse,
           ).getDepositFacet();
           await E(depositFacet).receive(payment);
+          return 'Deposit success!';
         },
         addEligibleUsers(list) {
           const { eligibleUsersStore: store } = this.state;
@@ -125,82 +136,64 @@ export const start = async (zcf, privateArgs, baggage) => {
           return AIRDROP_ADMIN_MESSAGES.ADD_ACCOUNTS_SUCCESS(list);
         },
         async depositAirdropPayment(payment) {
-          const {
-            airdropIssuerDetails: { issuer },
-          } = this.state;
-
           assert(
-            await E(issuer).isLive(payment),
-            `Payment has failed liveliness check. This is either because it has been used already, or it is from the wrong issuer. Please check these details and try again`,
+            await E(this.state.airdropIssuerDetails.issuer).isLive(payment),
+            AIRDROP_ADMIN_MESSAGES.DEPOSIT_TOKENS_ERROR,
           );
 
           try {
-            await this.facets.creator.depositToPurse(payment);
-            return 'Deposit success!';
+            return this.facets.creator.depositToPurse(payment);
           } catch (error) {
             return 'Error depositing payment.';
           }
         },
-        createPurse() {
-          return this.state.issuer.makeEmptyPurse();
-        },
       },
-      claim_powers: {
-        claim(userProof) {
+
+      public: {
+        async claim(userProof) {
           // 1. lookup for key
           assert(
             this.state.eligibleUsersStore.has(userProof),
-            'Claim failed. Signature does not correspond to an address on Airdrop allowlist..',
+            CLAIM_MESSAGES.INELIGIBLE_ACCOUNT_ERROR,
           );
+          const { issuer, brand } = this.state.airdropIssuerDetails;
 
+          const purse = await E(issuer).makeEmptyPurse();
+          // console.group('### inside claim method ###');
+          // console.log('---------------------------');
+          // console.log('purse:::', { purse });
+          // console.log('---------------------------');
+          await E(airdropPurse)
+            .withdraw(AmountMath.make(brand, 2_000n))
+            .then((response) => E(purse).deposit(response));
+
+          // console.log('payment::::', { payout });
+          // console.log('---------------------------');
+          // // log below should print 2_000n (the value of the payment we are depositing into it)
+          // console.log('purse amount :::', await E(purse).getCurrentAmount());
+          // console.groupEnd();
           // deposit from purse into a purse made for the user.
           // ---------------------
           // LOGIC GOES HERE
           // ---------------------
 
-          this.state.eligibleUsersStore.delete(userProof);
-          // checkAfter -- this.state.eligibleUsersStore.has(userProof);
+          await this.state.eligibleUsersStore.delete(userProof);
+          console.log(
+            'lookup logic ::: after delete',
+            this.state.eligibleUsersStore.has(userProof),
+          );
 
-          return 'Token claim success.';
+          return { message: 'Token claim success.', payout: purse };
         },
-      },
-      public: {
-        claim(x) {
-          // lookup can occur here before calling elsewhere.
-          // this could be an offerHandler for zcf.makeInvitation(claimHook)
-          return this.facets.claim_powers.claim(x);
-        },
+        /** @returns {AirdropIssuerDetails} */
         getAirdropTokenDetails() {
           return this.state.airdropIssuerDetails;
-        },
-        getAirdropIssuer() {
-          return this.state.airdropIssuerDetails.issuer;
-        },
-        makeClaimTokenInvitation() {
-          /** @type {OfferHandler} */
-          const claimTokensHook = async (claimerSeat, claimerOfferArgs) => {
-            assert(
-              // @ts-ignore
-              await E(eligibleWalletsStore).has(claimerOfferArgs.pubkey),
-              CONSTANTS.CLAIM_MESSAGES.INELIGIBLE_ACCOUNT_ERROR,
-            );
-
-            zcfMint.mintGains({ Airdrop: baseAmount }, claimerSeat);
-            claimerSeat.exit();
-            // logic for verifying public key against signature.
-            return CONSTANTS.CLAIM_MESSAGES.OFFER_SUCCESS(baseAmount);
-          };
-          return zcf.makeInvitation(
-            claimTokensHook,
-            'claim airdrop',
-            harden({ baseQuantity: baseAmount }),
-          );
         },
       },
     },
   );
 
-  const airdropCampaign = await provide(baggage, 'probe', () =>
+  const airdropCampaign = await provide(baggage, 'Airdrop Instance', () =>
     makeAirdrop(baggage),
   );
   return harden({

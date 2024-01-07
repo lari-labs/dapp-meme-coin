@@ -12,7 +12,11 @@ import { wallets as testWallets } from './data/2kwallets.js';
 import { setUpZoeForTest } from '@agoric/zoe/tools/setup-zoe.js';
 import { makeFakeMarshaller } from '@agoric/notifier/tools/testSupports.js';
 import { makeFakeStorageKit } from '@agoric/internal/src/storage-test-utils.js';
-import { AIRDROP_ADMIN_MESSAGES } from '../src/helpers/messages.js';
+import {
+  AIRDROP_ADMIN_MESSAGES,
+  CLAIM_MESSAGES,
+} from '../src/helpers/messages.js';
+import { oneDay } from '../src/helpers/time.js';
 
 const makePrivatePowers = (o = {}) => ({
   marshaller: Far('fake marshaller', { ...makeFakeMarshaller() }),
@@ -70,21 +74,23 @@ test('prepareAirdrop', async (t) => {
 
   const issuerKit = makeIssuerKit('Airdroplets');
 
+  const defaultPrivateArgs = {
+    claimPeriodEndTime: oneDay * 28, // 4 Weeks
+    tokenBrand: issuerKit.brand,
+    tokenIssuer: issuerKit.issuer,
+    powers: makePrivatePowers({ timerService: timer }),
+  };
+  const makePrivateArgs = (o = defaultPrivateArgs) => ({
+    ...o,
+    ...defaultPrivateArgs,
+  });
+
   const airdropInstance = await E(zoe).startInstance(
     airdropInstallation,
     {},
-    {
-      /** used tokenName in code with mint creation baked in
-      tokenName: 'Airdroplets',
-      */
-    },
-    {
-      claimPeriodEndTime: 60_000 * 60 * 24 * 7 * 4, // 4 Weeks
-      tokenBrand: issuerKit.brand,
-      tokenIssuer: issuerKit.issuer,
-      timerService: timer,
-      powers: makePrivatePowers({ timerService: timer }),
-    },
+    {},
+    // @ts-ignore
+    makePrivateArgs({}),
   );
 
   const { creatorFacet, publicFacet } = airdropInstance;
@@ -98,10 +104,8 @@ test('prepareAirdrop', async (t) => {
     AIRDROP_ADMIN_MESSAGES.ADD_ACCOUNTS_SUCCESS(walletData.slice(0, 50)),
   );
 
-  const issuer = await E(publicFacet).getAirdropIssuer();
-
   const details = await E(publicFacet).getAirdropTokenDetails();
-  const { brand: airdropBrand } = details;
+  const { brand: airdropBrand, issuer } = details;
 
   const airdroplets = (x = 0n) => AmountMath.make(airdropBrand, x);
   const twoThousandAirdroplets = airdroplets(2000n);
@@ -144,11 +148,25 @@ test('prepareAirdrop', async (t) => {
     await E(adminPurse).getCurrentAmount(),
     AmountMath.add(twentyMillionAirdroplets, twoThousandAirdroplets),
   );
+  CLAIM_MESSAGES;
+  t.throwsAsync(() => E(publicFacet).claim('iamnotavalidpublickey'), {
+    message: CLAIM_MESSAGES.INELIGIBLE_ACCOUNT_ERROR,
+  });
 
   const claimSeat = await E(publicFacet).claim(walletData[20]);
 
   // Need to finish implementing
-  t.deepEqual(claimSeat === 'Token claim success.', true);
+  t.deepEqual(
+    claimSeat.message,
+    'Token claim success.',
+    'claim method:: invoked with a valid public key :: should return an object with a message property.',
+  );
+
+  t.deepEqual(
+    await E(claimSeat.payout).getCurrentAmount(),
+    airdroplets(2_000n),
+    'claim method:: invoked with a valid public key :: should return an object with a payout property which references a newly created purse.',
+  );
 });
 
-test.todo('claim seat -- invalid user address');
+test.todo('claim seat -- notifier bonuses');

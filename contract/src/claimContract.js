@@ -68,13 +68,13 @@ const start = async (zcf, privateArgs) => {
       assert(
         // @ts-ignore
         await E(eligibleWalletsStore).has(claimerOfferArgs.pubkey),
-        CONSTANTS.CLAIM.INELIGIBLE_ACCOUNT_ERROR,
+        CONSTANTS.CLAIM_MESSAGES.INELIGIBLE_ACCOUNT_ERROR,
       );
 
       zcfMint.mintGains({ Airdrop: baseAmount }, claimerSeat);
       claimerSeat.exit();
       // logic for verifying public key against signature.
-      return CONSTANTS.CLAIM.OFFER_SUCCESS(baseAmount);
+      return CONSTANTS.CLAIM_MESSAGES.OFFER_SUCCESS(baseAmount);
     };
     return zcf.makeInvitation(
       claimTokensHook,
