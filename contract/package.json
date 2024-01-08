@@ -24,8 +24,6 @@
     "prettier": "^2.7.1"
   },
   "dependencies": {
-    "@agoric/assert": "beta",
-    "@agoric/deploy-script-support": "beta",
     "@agoric/ertp": "beta",
     "@agoric/internal": "0.4.0-u13.0",
     "@agoric/notifier": "beta",
