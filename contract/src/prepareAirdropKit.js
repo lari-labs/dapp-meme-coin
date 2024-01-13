@@ -42,6 +42,7 @@ const AirdropIssuerDetailsShape = harden({
 
 const initState = (zcf) => (baggage) =>
   harden({
+    airdropNotifier: baggage.get('storedNotifier'),
     eligibleUsersStore: baggage.get('eligibleUsersStore'),
     adminSeat: zcf.makeEmptySeatKit().zcfSeat,
     marshaller: baggage.get('marshaller'),
@@ -67,6 +68,7 @@ export const start = async (zcf, privateArgs, baggage) => {
   tracer('privateArgs:', privateArgs);
 
   const {
+    // airdropNotifier,
     claimPeriodEndTime,
     eligibleUsersStore,
     tokenIssuer,
