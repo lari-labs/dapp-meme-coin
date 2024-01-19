@@ -42,7 +42,7 @@ const AirdropIssuerDetailsShape = harden({
 
 const initState = (zcf) => (baggage) =>
   harden({
-    airdropNotifier: baggage.get('storedNotifier'),
+    airdropNotifier: baggage.get('airdropNotifier'),
     eligibleUsersStore: baggage.get('eligibleUsersStore'),
     adminSeat: zcf.makeEmptySeatKit().zcfSeat,
     marshaller: baggage.get('marshaller'),
@@ -68,7 +68,7 @@ export const start = async (zcf, privateArgs, baggage) => {
   tracer('privateArgs:', privateArgs);
 
   const {
-    // airdropNotifier,
+    airdropNotifier,
     claimPeriodEndTime,
     eligibleUsersStore,
     tokenIssuer,
@@ -77,6 +77,8 @@ export const start = async (zcf, privateArgs, baggage) => {
     marshaller,
     storageNode,
   } = await provideAll(baggage, {
+    airdropNotifier: () =>
+      E(privateArgs.powers.timerService).makeNotifier(0n, 10_000n),
     eligibleUsersStore: () =>
       makeScalarBigSetStore('eligible users', {
         durable: true,
@@ -153,6 +155,7 @@ export const start = async (zcf, privateArgs, baggage) => {
 
       public: {
         async claim(userProof) {
+          console.log('state:::', this.state.airdropNotifier);
           // 1. lookup for key
           assert(
             this.state.eligibleUsersStore.has(userProof),
