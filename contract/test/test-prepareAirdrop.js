@@ -17,7 +17,10 @@ import {
   CLAIM_MESSAGES,
 } from '../src/helpers/messages.js';
 import { oneDay } from '../src/helpers/time.js';
-import { makeSha256 } from './sha256.js';
+import { createHash } from 'crypto';
+
+const makeSha256 = (input) => createHash('sha256').update(input).digest('hex');
+
 const makePrivatePowers = (o = {}) => ({
   marshaller: Far('fake marshaller', { ...makeFakeMarshaller() }),
   storageNode: makeFakeStorageKit('governedPsmTest').rootNode,
