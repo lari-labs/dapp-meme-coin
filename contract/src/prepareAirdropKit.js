@@ -17,6 +17,9 @@ const tracer = makeTracer('Airdrop airdropCampaign');
 /** @type {airdropCampaignMeta} */
 export const meta = {
   upgradability: 'canUpgrade',
+  terms: {
+    proofHolderFacet: M.remotable('proofHolder Powers'),
+  },
   privateArgsShape: M.splitRecord({
     tokenIssuer: IssuerShape,
     tokenBrand: BrandShape,
@@ -42,6 +45,8 @@ const AirdropIssuerDetailsShape = harden({
 
 const initState = (zcf) => (baggage) =>
   harden({
+    airdropNotifier: baggage.get('airdropNotifier'),
+    treeRoot: baggage.get('treeRoot'),
     eligibleUsersStore: baggage.get('eligibleUsersStore'),
     adminSeat: zcf.makeEmptySeatKit().zcfSeat,
     marshaller: baggage.get('marshaller'),
@@ -66,17 +71,23 @@ export const start = async (zcf, privateArgs, baggage) => {
 
   tracer('privateArgs:', privateArgs);
 
+  const { proofHolderFacet: phFacet } = zcf.getTerms();
+
+  console.log({ phFacet });
   const {
-    // airdropNotifier,
+    airdropNotifier,
+    treeRoot,
     eligibleUsersStore,
     claimPeriodEndTime,
-
     tokenIssuer,
     airdropBrand,
     airdropPurse,
     marshaller,
     storageNode,
   } = await provideAll(baggage, {
+    airdropNotifier: () =>
+      E(privateArgs.powers.timerService).makeNotifier(0n, 10_000n),
+    treeRoot: () => E(phFacet).getRoot(),
     eligibleUsersStore: () =>
       makeScalarBigSetStore('eligible users', {
         durable: true,
@@ -89,6 +100,8 @@ export const start = async (zcf, privateArgs, baggage) => {
     marshaller: () => privateArgs.powers.marshaller,
     storageNode: () => privateArgs.powers.storageNode,
   });
+  const claimFn = (address) =>
+    E(zcf.getTerms().proofHolderFacet).hashFn(address);
 
   /**
    * @typedef {object} AirdropIssuerDetails
@@ -106,6 +119,11 @@ export const start = async (zcf, privateArgs, baggage) => {
         addEligibleUsers: M.call(M.arrayOf(M.string())).returns(M.string()),
       }),
       public: M.interface('Public Facet', {
+        getTreeRoot: M.call().returns(M.string()),
+
+        claimInclusion: M.call(M.string(), M.arrayOf(M.string())).returns(
+          M.any(),
+        ),
         // getAirdropIssuer: M.call().returns(IssuerShape),
         getAirdropTokenDetails: M.call().returns(AirdropIssuerDetailsShape),
         claim: M.call(M.string()).returns(M.any()),
@@ -152,7 +170,21 @@ export const start = async (zcf, privateArgs, baggage) => {
       },
 
       public: {
+        getTreeRoot() {
+          return this.state.treeRoot;
+        },
+        async claimInclusion(address, proof) {
+          console.log('------------ claiming inclusion ------------');
+          console.log('####### address', {
+            address,
+            claimFn: await claimFn(address),
+          });
+          console.log('-----------------------');
+          console.log('###proof', proof);
+          console.log('-----------------------');
+        },
         async claim(userProof) {
+          console.log('state:::', this.state.airdropNotifier);
           // 1. lookup for key
           assert(
             this.state.eligibleUsersStore.has(userProof),

@@ -17,12 +17,25 @@ import {
   CLAIM_MESSAGES,
 } from '../src/helpers/messages.js';
 import { oneDay } from '../src/helpers/time.js';
-
+import { makeSha256 } from './sha256.js';
 const makePrivatePowers = (o = {}) => ({
   marshaller: Far('fake marshaller', { ...makeFakeMarshaller() }),
   storageNode: makeFakeStorageKit('governedPsmTest').rootNode,
   ...o,
 });
+
+const dummyWallets = [
+  'cosmos1p00xhl9ysacadcduxglhavstr8yvh9hfzk6z6w',
+  'cosmos1yquxnvua4me07zxyq85fnxkdg9htqvn90x8m7h',
+  'cosmos1l8ccn5mvam289seaxlyghx57d8v2m4wm6ulttw',
+  'cosmos1rsffgqju8cuvrnvvxk2yw2q0ylwzk8mg6ly4gw',
+  'cosmos1s4nhzkq3ch39me9lclcp4ynk2ywntlcwf887kw',
+  'cosmos12qu2l5kf0qpy3jhe42ny55fjqd9n060c2nvw3h',
+  'cosmos1sndu8k4j539qzler2p0vqgguqkp2lp2wztlc0p',
+  'cosmos1r9pz0v0qwj7pkvx5ww2q3cmhwh0assswevxzrz',
+  'cosmos13r67v3nk24654e2l372rexk7uxhxutu92ugyt3',
+  'cosmos17w9swykduq93glcx2mldsszulprawretga4sqj',
+];
 
 const wallets = testWallets.map((x) => x.pubkey);
 
@@ -85,10 +98,31 @@ test('prepareAirdrop', async (t) => {
     ...defaultPrivateArgs,
   });
 
+  const merkleTreeDetails = {
+    root: 'bdc991f6708c800b107ff2f9abc9d2ed3ed0a13a1585e31beab7e96fee1b1e95',
+  };
+  const proofHolderBehaviors = Far('Proof Holder Powers', {
+    getRoot() {
+      return merkleTreeDetails.root;
+    },
+    hashFn: makeSha256,
+    verificationFunction: () => {
+      /**
+       * verify proof against root.
+       *
+       * (root, [proof] , address?)
+       *
+       */
+      return 'im ready.';
+    },
+  });
+
   const airdropInstance = await E(zoe).startInstance(
     airdropInstallation,
     {},
-    {},
+    {
+      proofHolderFacet: proofHolderBehaviors,
+    },
     // @ts-ignore
     makePrivateArgs({}),
   );
@@ -105,6 +139,20 @@ test('prepareAirdrop', async (t) => {
   );
 
   const details = await E(publicFacet).getAirdropTokenDetails();
+
+  t.is(
+    await E(publicFacet).getTreeRoot(),
+    'bdc991f6708c800b107ff2f9abc9d2ed3ed0a13a1585e31beab7e96fee1b1e95',
+    'public facet should expose a method for obtaining the merkle root',
+  );
+
+  t.deepEqual(
+    await E(publicFacet).claimInclusion(
+      'cosmos1p00xhl9ysacadcduxglhavstr8yvh9hfzk6z6w',
+      ['a', 'b', 'c'],
+    ),
+    makeSha256('cosmos1p00xhl9ysacadcduxglhavstr8yvh9hfzk6z6w#'),
+  );
   const { brand: airdropBrand, issuer } = details;
 
   const airdroplets = (x = 0n) => AmountMath.make(airdropBrand, x);
@@ -168,5 +216,25 @@ test('prepareAirdrop', async (t) => {
     'claim method:: invoked with a valid public key :: should return an object with a payout property which references a newly created purse.',
   );
 });
+
+/**
+ * Frontend
+ *
+ * Sign a transaction confirming their address.
+ *
+ *
+ *
+ */
+
+/**
+ * Scenarios I need to test for:
+ *
+ * <Incoming Chat GPT Response>
+ *
+ *
+ * Merkle Root
+ * Merkle Tree Verifications
+ *
+ */
 
 test.todo('claim seat -- notifier bonuses');
