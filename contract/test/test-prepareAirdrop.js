@@ -18,8 +18,56 @@ import {
 } from '../src/helpers/messages.js';
 import { oneDay } from '../src/helpers/time.js';
 import { createHash } from 'crypto';
-
 const makeSha256 = (input) => createHash('sha256').update(input).digest('hex');
+
+const defaultAccount = { address: 'string', amount: 0 };
+
+const verify =
+  (root) =>
+  (proof = [''], account = defaultAccount) => {
+    let hashBuf = Buffer.from(
+      makeSha256(account.address + account.amount).toString(),
+    );
+
+    proof.forEach((proofElem) => {
+      const proofBuf = Buffer.from(proofElem, 'hex');
+      if (hashBuf < proofBuf) {
+        hashBuf = Buffer.from(
+          makeSha256(Buffer.concat([hashBuf, proofBuf]).toString()),
+        );
+      } else {
+        hashBuf = Buffer.from(
+          makeSha256(Buffer.concat([proofBuf, hashBuf]).toString()),
+        );
+      }
+    });
+
+    return root === hashBuf.toString('hex');
+  };
+
+test('verify inclusion proof', async (t) => {
+  const treeRoot =
+    '51aa9b2495ebb5235a3c6ebe37550ab100979eaa5371e87e14611699a023cc3b';
+  const proof = [
+    '395301e5eea92fe2d042469a3d591e8a9b60be83b3671b9bdccae5b5a1333487',
+    'a9255facf82dfdc7587f1acb32584631bc451b8681c289c920946786810d11ff',
+    'e05363877cfd6b974c1c61c11a1c90b6f5ee9f8f3858d0536ec5cde262f6012a',
+    'd34fb57f4fdf3dbbf480ca3dcf445a3286505bab22addba8cf3261ce85fa59ce',
+    '702f8ec43029a165df18b6a49df18ac40710ec1683394af11d457078c0ac78d7',
+    '54d7a4efd03fabac46616afc953f39103b27a9817dc78ac78537ab050f0ba143',
+    '27c1a815457aba1d0fe070a064c8e66002f4c76dbdb7be668f6fc50ce27c7e47',
+    'd3b9118364345043f1b374da688878ee01ecb4035710bfa1638bc2d5baa328e4',
+  ];
+
+  const address = 'cosmos1rsffgqju8cuvrnvvxk2yw2q0ylwzk8mg6ly4gw';
+  const actual = verify(treeRoot)(proof, { address, amount: 2000 });
+
+  await t.deepEqual(
+    actual,
+    true,
+    'verify function should return true for a valid address.',
+  );
+});
 
 const makePrivatePowers = (o = {}) => ({
   marshaller: Far('fake marshaller', { ...makeFakeMarshaller() }),
@@ -110,19 +158,13 @@ test('prepareAirdrop', async (t) => {
     },
     hashFn: makeSha256,
     verificationFunction: () => {
-      /**
-       * verify proof against root.
-       *
-       * (root, [proof] , address?)
-       *
-       */
       return 'im ready.';
     },
   });
 
   const airdropInstance = await E(zoe).startInstance(
     airdropInstallation,
-    {},
+    { Airdrop: issuerKit.issuer },
     {
       proofHolderFacet: proofHolderBehaviors,
     },
@@ -142,6 +184,7 @@ test('prepareAirdrop', async (t) => {
   );
 
   const details = await E(publicFacet).getAirdropTokenDetails();
+  const { brand: airdropBrand, issuer } = details;
 
   t.is(
     await E(publicFacet).getTreeRoot(),
@@ -156,7 +199,6 @@ test('prepareAirdrop', async (t) => {
     ),
     makeSha256('cosmos1p00xhl9ysacadcduxglhavstr8yvh9hfzk6z6w#'),
   );
-  const { brand: airdropBrand, issuer } = details;
 
   const airdroplets = (x = 0n) => AmountMath.make(airdropBrand, x);
   const twoThousandAirdroplets = airdroplets(2000n);

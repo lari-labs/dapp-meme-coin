@@ -21,8 +21,6 @@ export const meta = {
     proofHolderFacet: M.remotable('proofHolder Powers'),
   },
   privateArgsShape: M.splitRecord({
-    tokenIssuer: IssuerShape,
-    tokenBrand: BrandShape,
     powers: {
       marshaller: M.remotable('Marshaller'),
       storageNode: M.remotable('storageNode'),
@@ -45,9 +43,8 @@ const AirdropIssuerDetailsShape = harden({
 
 const initState = (zcf) => (baggage) =>
   harden({
-    airdropNotifier: baggage.get('airdropNotifier'),
     treeRoot: baggage.get('treeRoot'),
-    eligibleUsersStore: baggage.get('eligibleUsersStore'),
+    claimedUsersStore: baggage.get('claimedUsersStore'),
     adminSeat: zcf.makeEmptySeatKit().zcfSeat,
     marshaller: baggage.get('marshaller'),
     storageNode: baggage.get('storageNode'),
@@ -58,8 +55,8 @@ const initState = (zcf) => (baggage) =>
         : baggage.get('claimPeriodEndTime'),
     },
     airdropIssuerDetails: {
-      issuer: baggage.get('tokenIssuer'),
-      brand: baggage.get('airdropBrand'),
+      issuer: zcf.getTerms().issuers.Airdrop,
+      brand: zcf.getTerms().brands.Airdrop,
     },
     airdropPurse: baggage.get('airdropPurse'),
   });
@@ -67,6 +64,8 @@ const initState = (zcf) => (baggage) =>
 export const start = async (zcf, privateArgs, baggage) => {
   // TODO handle fail cases?
   tracer('inside prepareAirdropKit');
+
+  console.log(zcf.getTerms());
   handleFirstIncarnation(baggage, 'airdropCampaignVersion');
 
   tracer('privateArgs:', privateArgs);
@@ -75,9 +74,8 @@ export const start = async (zcf, privateArgs, baggage) => {
 
   console.log({ phFacet });
   const {
-    airdropNotifier,
     treeRoot,
-    eligibleUsersStore,
+    claimedUsersStore,
     claimPeriodEndTime,
     tokenIssuer,
     airdropBrand,
@@ -85,17 +83,13 @@ export const start = async (zcf, privateArgs, baggage) => {
     marshaller,
     storageNode,
   } = await provideAll(baggage, {
-    airdropNotifier: () =>
-      E(privateArgs.powers.timerService).makeNotifier(0n, 10_000n),
     treeRoot: () => E(phFacet).getRoot(),
-    eligibleUsersStore: () =>
+    claimedUsersStore: () =>
       makeScalarBigSetStore('eligible users', {
         durable: true,
       }),
     claimPeriodEndTime: () =>
       !privateArgs.claimPeriodEndTime ? null : privateArgs.claimPeriodEndTime,
-    tokenIssuer: () => privateArgs.tokenIssuer,
-    airdropBrand: () => privateArgs.tokenBrand,
     airdropPurse: () => E(privateArgs.tokenIssuer).makeEmptyPurse(),
     marshaller: () => privateArgs.powers.marshaller,
     storageNode: () => privateArgs.powers.storageNode,
@@ -132,7 +126,11 @@ export const start = async (zcf, privateArgs, baggage) => {
         createPurse: M.call().returns(PurseShape),
       }),
     },
-    initState(zcf),
+    (x) => {
+      const s = initState(zcf)(x);
+      console.log({ s });
+      return s;
+    },
     {
       helpers: {
         createPurse() {
@@ -151,7 +149,7 @@ export const start = async (zcf, privateArgs, baggage) => {
           return 'Deposit success!';
         },
         addEligibleUsers(list) {
-          const { eligibleUsersStore: store } = this.state;
+          const { claimedUsersStore: store } = this.state;
           store.addAll(list);
           return AIRDROP_ADMIN_MESSAGES.ADD_ACCOUNTS_SUCCESS(list);
         },
@@ -184,10 +182,9 @@ export const start = async (zcf, privateArgs, baggage) => {
           console.log('-----------------------');
         },
         async claim(userProof) {
-          console.log('state:::', this.state.airdropNotifier);
           // 1. lookup for key
           assert(
-            this.state.eligibleUsersStore.has(userProof),
+            this.state.claimedUsersStore.has(userProof),
             CLAIM_MESSAGES.INELIGIBLE_ACCOUNT_ERROR,
           );
           const { issuer, brand } = this.state.airdropIssuerDetails;
@@ -211,10 +208,10 @@ export const start = async (zcf, privateArgs, baggage) => {
           // LOGIC GOES HERE
           // ---------------------
 
-          await this.state.eligibleUsersStore.delete(userProof);
+          await this.state.claimedUsersStore.delete(userProof);
           console.log(
             'lookup logic ::: after delete',
-            this.state.eligibleUsersStore.has(userProof),
+            this.state.claimedUsersStore.has(userProof),
           );
 
           return { message: 'Token claim success.', payout: purse };
