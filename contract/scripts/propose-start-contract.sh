@@ -3,8 +3,8 @@ set -xueo pipefail
 
 cd /workspace/contract
 
-SCRIPT=start-sell-concert-tickets.js
-PERMIT=start-sell-concert-tickets-permit.json
+SCRIPT=start-contractStarter.js
+PERMIT=contractStarter-permit.json
 ls -sh "$SCRIPT" "$PERMIT"
 
 PROPOSAL=$(agd query gov proposals --output json | jq -c '.proposals | length | .+1')
