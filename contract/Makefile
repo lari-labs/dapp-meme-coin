@@ -103,8 +103,8 @@ print-key: /root/.agoric/user1.key
 	@agd keys show user1 -a --keyring-backend="test"
 	@echo
 
-SCRIPT=start-sell-concert-tickets.js
-PERMIT=start-sell-concert-tickets-permit.json
+SCRIPT=start-contractStarter.js
+PERMIT=contractStarter-permit.json
 start-contract: $(SCRIPT) $(PERMIT) install-bundles
 	scripts/propose-start-contract.sh
 

@@ -4,7 +4,7 @@
  * Creates files for starting an instance of the contract:
  * * contract source and instantiation proposal bundles to be published via
  *   `agd tx swingset install-bundle`
- * * start-sell-concert-tickets-permit.json and start-sell-concert-tickets.js to submit the
+ * * start-contractStarter-permit.json and start-contractStarter.js to submit the
  *   instantiation proposal via `agd tx gov submit-proposal swingset-core-eval`
  *
  * Usage:
@@ -12,7 +12,7 @@
  */
 
 import { makeHelpers } from '@agoric/deploy-script-support';
-import { getManifestForSellConcertTickets } from '../src/sell-concert-tickets-proposal.js';
+import { permit } from '../src/start-contractStarter.js';
 
 /** @type {import('@agoric/deploy-script-support/src/externalTypes.js').ProposalBuilder} */
 export const sellConcertTicketsProposalBuilder = async ({
@@ -20,14 +20,14 @@ export const sellConcertTicketsProposalBuilder = async ({
   install,
 }) => {
   return harden({
-    sourceSpec: '../src/sell-concert-tickets-proposal.js',
+    sourceSpec: '../src/start-contractStarter.js',
     getManifestCall: [
-      getManifestForSellConcertTickets.name,
+      permit.name,
       {
         sellConcertTicketsRef: publishRef(
           install(
-            '../src/sell-concert-tickets.contract.js',
-            '../bundles/bundle-sell-concert-tickets.js',
+            '../src/contractStarter.js',
+            '../bundles/bundle-contractStarter.js',
             {
               persist: true,
             },
@@ -41,5 +41,8 @@ export const sellConcertTicketsProposalBuilder = async ({
 /** @type {DeployScriptFunction} */
 export default async (homeP, endowments) => {
   const { writeCoreProposal } = await makeHelpers(homeP, endowments);
-  await writeCoreProposal('start-sell-concert-tickets', sellConcertTicketsProposalBuilder);
+  await writeCoreProposal(
+    'start-contractStarter',
+    sellConcertTicketsProposalBuilder,
+  );
 };
