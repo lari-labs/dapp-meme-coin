@@ -24,6 +24,7 @@ import {
   getBundleId,
   makeBundleCacheContext,
 } from './boot-tools.js';
+
 const makeSha256 = input => createHash('sha256').update(input).digest('hex');
 
 const defaultAccount = { address: 'string', amount: 0 };

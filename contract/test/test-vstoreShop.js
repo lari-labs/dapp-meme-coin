@@ -1,5 +1,4 @@
 // @ts-check
-import { test as anyTest } from './airdropData/prepare-test-env-ava.js';
 import { createRequire } from 'node:module';
 import { E } from '@endo/far';
 import { makeNodeBundleCache } from '@endo/bundle-source/cache.js';
@@ -9,6 +8,7 @@ import { makePromiseSpace, makeNameHubKit } from '@agoric/vats';
 import { makeWellKnownSpaces } from '@agoric/vats/src/core/utils.js';
 import { makeFakeVatAdmin } from '@agoric/zoe/tools/fakeVatAdmin.js';
 import { makeZoeKitForTest } from '@agoric/zoe/tools/setup-zoe.js';
+import { test as anyTest } from './airdropData/prepare-test-env-ava.js';
 import { withAmountUtils } from './ertp-aux.js';
 
 import { contractName, startVstoreShop } from '../src/start-vstoreShop.js';

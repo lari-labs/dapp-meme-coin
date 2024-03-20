@@ -16,9 +16,9 @@ import {
   assertIssuerKeywords,
   provideAll,
 } from '@agoric/zoe/src/contractSupport/index.js';
-import { AIRDROP_ADMIN_MESSAGES, CLAIM_MESSAGES } from './helpers/messages.js';
 import { E, Far } from '@endo/far';
 import { makePromiseKit } from '@endo/promise-kit';
+import { AIRDROP_ADMIN_MESSAGES, CLAIM_MESSAGES } from './helpers/messages.js';
 
 const makeTracer = label => value => {
   console.log(label.toUpperCase(), '::::', value);
@@ -127,8 +127,9 @@ export const start = async (zcf, privateArgs, baggage) => {
   const openClaimingWindowHandler = async creatorSeat => {};
   /**
    * @typedef {object} AirdropIssuerDetails
-   * @prop {Issuer} issuer
-   * @prop {Brand} brand
+   * @property {Issuer} issuer
+   * @property {Brand} brand
+   * @property
    */
   const makeAirdrop = prepareExoClassKit(
     baggage,

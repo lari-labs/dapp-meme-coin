@@ -137,7 +137,7 @@ export const seatLike = updates => {
     payouts: makePromiseKit(),
   };
   (async () => {
-    let seq = 0;
+    const seq = 0;
     try {
       console.log('inside try...catch');
       console.log('current seq:::', { seq });

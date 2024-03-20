@@ -79,6 +79,9 @@
     },
     "extends": [
       "@agoric"
+    ],
+    "ignorePatterns": [
+      "./node_modules"
     ]
   },
   "prettier": {

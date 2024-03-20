@@ -2,6 +2,7 @@
 import { E, Far } from '@endo/far';
 import { makePromiseKit } from '@endo/promise-kit';
 import { allValues, mapValues } from '../src/objectTools.js';
+
 export { allValues, mapValues };
 
 const { values } = Object;
@@ -13,6 +14,7 @@ const { values } = Object;
  *   namesByAddressAdmin: ERef<import('@agoric/vats').NameAdmin>;
  * }} powers
  *
+ * @param issuerKeywordRecord
  * @typedef {import('@agoric/smart-wallet').OfferSpec} OfferSpec
  *
  * @typedef {Awaited<ReturnType<Awaited<ReturnType<typeof mockWalletFactory>['makeSmartWallet']>>>} MockWallet

@@ -1,11 +1,11 @@
 // @ts-check
-import { test as anyTest } from './airdropData/prepare-test-env-ava.js';
 import { createRequire } from 'module';
-import { Id, IO, Task } from '../src/airdrop/adts/monads.js';
 import { E } from '@endo/far';
-import { makeWalletFactory } from './wallet-tools.js';
 import { AmountMath, AssetKind } from '@agoric/ertp/src/amountMath.js';
 import { makeIssuerKit } from '@agoric/ertp';
+import { makeWalletFactory } from './wallet-tools.js';
+import { Id, IO, Task } from '../src/airdrop/adts/monads.js';
+import { test as anyTest } from './airdropData/prepare-test-env-ava.js';
 import { makeFan, launcherLarry, starterSam } from './market-actors.js';
 import {
   makeBundleCacheContext,
@@ -183,41 +183,6 @@ test.serial('start launchIt instance to launch token', async t => {
     .catch(err => {
       return new Error('Error starting contract', err);
     });
-  const startOpts2 = {
-    customTerms: {
-      name: 'memecoinAirdrop',
-      rootHash: 'fs2defffdd8s88usd',
-      claimWindowLength: 8_640_000n * 28n,
-    },
-    privateArgs: {
-      purse: airdropPurse,
-    },
-  };
-
-  // t.deepEqual(await instance, {});
-
-  // const makeFanWallet = async ix => {
-  //   const wallet = await walletFactory.makeSmartWallet(`agoric1fan${ix}`);
-  //   await E(wallets.offers).addIssuer(AIRDROPLETS.issuer);
-  //   await E(wallets.deposit).receive(
-  //     await E(AIRDROPLETS.mint).mintPayment(
-  //       AmountMath.make(AIRDROPLETS.brand, 125n),
-  //     ),
-  //   );
-  //   return wallet;
-  // };
-  const range = n => [...Array(n).keys()];
-  let current = 0;
-  // const fans = await Promise.all(
-  //   range(12).map(async ix => {
-  //     const wallet = await makeFanWallet(ix);
-  //     const quantity = 3 + ((ix * 23) % 47);
-  //     current += 1;
-  //     console.log('making fan wallet:::::', wallet, { quantity, current });
-  //     return makeFan(t, { wallet, ix, qty: BigInt(quantity) }, wellKnown);
-  //   }),
-  // );
-  // await Promise.all(fans.map(fan => E(fan).deposit(instance)));
 
   const timer = powers.consume.chainTimerService;
   const timerBrand = await powers.brand.consume.timer;
