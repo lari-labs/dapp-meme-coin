@@ -10,3 +10,4 @@ _agstate/yarn-links/
 .parcel-cache/
 ui/.cache/
 ui/dist/
+.DS_Store
