@@ -1,11 +1,12 @@
 // @ts-check
+// eslint-disable-next-line import/order
+import { test as anyTest } from './airdropData/prepare-test-env-ava.js';
 import { createRequire } from 'module';
 import { E } from '@endo/far';
 import { AmountMath, AssetKind } from '@agoric/ertp/src/amountMath.js';
 import { makeIssuerKit } from '@agoric/ertp';
 import { makeWalletFactory } from './wallet-tools.js';
 import { Id, IO, Task } from '../src/airdrop/adts/monads.js';
-import { test as anyTest } from './airdropData/prepare-test-env-ava.js';
 import { makeFan, launcherLarry, starterSam } from './market-actors.js';
 import {
   makeBundleCacheContext,
@@ -89,13 +90,15 @@ test.serial('start launchIt instance to launch token', async t => {
   const brand = {
     Invitation: await powers.brand.consume.Invitation,
   };
+  const timerService = await powers.consume.chainTimerService; // XXX
+
   /**
    * @type {import('./market-actors.js').WellKnown &
    *  import('./market-actors.js').WellKnownKinds &
    *  import('./market-actors.js').BoardAux}
    */
   const wellKnown = {
-    timerService: await powers.consume.chainTimerService, // XXX
+    timerService,
     installation: powers.installation.consume,
     instance: powers.instance.consume,
     issuer: powers.issuer.consume,
@@ -158,7 +161,7 @@ test.serial('start launchIt instance to launch token', async t => {
     await mintBrandedPayment(20n * 1_000_000n),
   );
 
-  const launcher = await launcherLarry(t, { wallet: wallets.larry }, wellKnown);
+  const larry = await launcherLarry(t, { wallet: wallets.larry }, wellKnown);
 
   const startOpts = {
     customTerms: {
@@ -168,18 +171,11 @@ test.serial('start launchIt instance to launch token', async t => {
     },
     privateArgs: {
       purse: airdropPurse,
+      timer: timerService,
     },
   };
-  const liveAirdrop = await E(launcher)
+  const instance = await E(larry)
     .launch(installation, startOpts)
-    .then((res, rej) =>
-      rej
-        ? new Error('Error launching airdrop')
-        : E(res).launch(installation, {
-            ...startOpts,
-            customTerms: { ...startOpts.customTerms, claimWindowLength: 11n },
-          }),
-    )
     .catch(err => {
       return new Error('Error starting contract', err);
     });
@@ -191,7 +187,7 @@ test.serial('start launchIt instance to launch token', async t => {
   t.log('time passed... to', afterDeadline.absValue);
 
   t.log('TODO: should fan figure out his share of the proceeds?');
-  await E(launcher).openAirdrop();
+  await E(larry).collect();
   // await Promise.all(fans.map(fan => E(fan).redeem(instance)));
 
   const m = makeClientMarshaller();

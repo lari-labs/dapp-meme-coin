@@ -19,6 +19,7 @@ import {
 import { E, Far } from '@endo/far';
 import { makePromiseKit } from '@endo/promise-kit';
 import { AIRDROP_ADMIN_MESSAGES, CLAIM_MESSAGES } from './helpers/messages.js';
+import '../../types.js';
 
 const makeTracer = label => value => {
   console.log(label.toUpperCase(), '::::', value);
@@ -71,6 +72,10 @@ const initState = zcf => baggage =>
     airdropPurse: baggage.get('airdropPurse'),
   });
 
+const finalMetrics = (promise, purse) =>
+  promise.resolve({
+    remainingTokens: purse.getCurrentAmount(),
+  });
 const startupAssertion = (arg, keyName) =>
   assert(
     arg,
@@ -96,6 +101,8 @@ export const start = async (zcf, privateArgs, baggage) => {
   handleFirstIncarnation(baggage, 'airdropCampaignVersion');
 
   startupAssertion(privateArgs.purse, 'privateArgs.purse');
+  startupAssertion(privateArgs.timer, 'privateArgs.purse');
+
   startupAssertion(merkleRoot, 'terms.rootHash');
   startupAssertion(claimWindowLength, 'terms.claimWindowLength');
   tracer('privateArgs:', privateArgs);
@@ -153,6 +160,8 @@ export const start = async (zcf, privateArgs, baggage) => {
         claim: M.call(M.string()).returns(M.any()),
       }),
       helpers: M.interface('Helper Facet', {
+        getClaimPeriodP: M.call().returns(M.promise()),
+
         getInternalDepositFacet: M.call().returns(DepositFacetShape),
         createPurse: M.call().returns(PurseShape),
         setAirdropWaker: M.call().returns(M.promise()),
@@ -177,19 +186,29 @@ export const start = async (zcf, privateArgs, baggage) => {
           const claimWindowPk = makePromiseKit();
           const currentTime = await E(this.state.timer).getCurrentTimestamp();
 
-          console.log('INSIDE SET AIRDROP WAKER ::::', currentTime);
+          console.log('INSIDE SET AIRDROP WAKER ::::', {
+            currentTime,
+            claimWindowPk,
+          });
           await E(this.state.timer).setWakeup(
             claimWindowTimeframe,
             makeWaker('airdropWaker', timestamp => {
               console.log('time has resolved!!!', { timestamp });
 
+              // zcf.shutdown('Airdrop claim window has expired.');
               claimWindowPk.resolve({
                 message: 'claim period has ended',
                 timestamp,
               });
-              return timestamp;
+
+              this.facets.helpers.getClaimPeriodP();
             }),
           );
+        },
+        async getClaimPeriodP(p) {
+          return Far('claimPeriodPromise', {
+            getClaimPeriodP: () => p,
+          });
         },
       },
       creator: {
@@ -202,8 +221,8 @@ export const start = async (zcf, privateArgs, baggage) => {
           console.log('------------------------');
           console.groupEnd();
           /** @param {ZCFSeat} creator */
-          const startAirdropHandler = async () => {
-            console.log('inside startAirdropHandler');
+          const startAirdropHandler = async (seat, offerArgs) => {
+            console.log('inside startAirdropHandler', { offerArgs });
             this.state.internalPurse.deposit(
               airdropPurse.withdraw(airdropPurse.getCurrentAmount()),
             );
@@ -216,12 +235,7 @@ export const start = async (zcf, privateArgs, baggage) => {
             return 'successfully opened claiming window';
           };
 
-          return zcf.makeInvitation(
-            startAirdropHandler,
-            'startAirdropHandler',
-            { timePeriod: this.state.claimWindowTimeframe },
-            undefined,
-          );
+          return zcf.makeInvitation(startAirdropHandler, 'startAirdropHandler');
         },
         getPurse() {
           return airdropPurse;
