@@ -1,23 +1,92 @@
 // @ts-check
 /* global assert */
 /* eslint-disable import/order -- https://github.com/endojs/endo/issues/1235 */
-import { test } from './prepare-test-env-ava.js';
+import { test as anyTest } from './airdropData/prepare-test-env-ava.js';
 import path from 'path';
 import bundleSource from '@endo/bundle-source';
 import { E } from '@endo/eventual-send';
 import buildManualTimer from '@agoric/zoe/tools/manualTimer.js';
 import { AmountMath, makeIssuerKit } from '@agoric/ertp';
 import { Far } from '@endo/marshal';
-import { wallets as testWallets } from './data/2kwallets.js';
+import { wallets as testWallets } from './airdropData/2kwallets.js';
 import { setUpZoeForTest } from '@agoric/zoe/tools/setup-zoe.js';
 import { makeFakeMarshaller } from '@agoric/notifier/tools/testSupports.js';
 import { makeFakeStorageKit } from '@agoric/internal/src/storage-test-utils.js';
 import {
   AIRDROP_ADMIN_MESSAGES,
   CLAIM_MESSAGES,
-} from '../src/helpers/messages.js';
-import { oneDay } from '../src/helpers/time.js';
-import { makeSha256 } from './sha256.js';
+} from '../src/airdrop/helpers/messages.js';
+import { oneDay } from '../src/airdrop/helpers/time.js';
+import { createHash } from 'crypto';
+import { createRequire } from 'module';
+import {
+  bootAndInstallBundles,
+  getBundleId,
+  makeBundleCacheContext,
+} from './boot-tools.js';
+
+const makeSha256 = input => createHash('sha256').update(input).digest('hex');
+
+const defaultAccount = { address: 'string', amount: 0 };
+/** @type {import('ava').TestFn<Awaited<ReturnType<makeBundleCacheContext>>>} */
+const test = anyTest;
+
+const nodeRequire = createRequire(import.meta.url);
+
+const bundleRoots = {
+  postalSvc: nodeRequire.resolve('../src/postalSvc.js'),
+  airdropCampaign: nodeRequire.resolve('../src/airdropCampaign.js'),
+};
+
+test.before(async t => (t.context = await makeBundleCacheContext(t)));
+
+const verify =
+  root =>
+  (proof = [''], account = defaultAccount) => {
+    let hashBuf = Buffer.from(
+      makeSha256(account.address + account.amount).toString(),
+    );
+
+    proof.forEach(proofElem => {
+      const proofBuf = Buffer.from(proofElem, 'hex');
+      if (hashBuf < proofBuf) {
+        hashBuf = Buffer.from(
+          makeSha256(Buffer.concat([hashBuf, proofBuf]).toString()),
+        );
+      } else {
+        hashBuf = Buffer.from(
+          makeSha256(Buffer.concat([proofBuf, hashBuf]).toString()),
+        );
+      }
+    });
+
+    return root === hashBuf.toString('hex');
+  };
+
+// test('verify inclusion proof', async t => {
+//   const treeRoot =
+//     '51aa9b2495ebb5235a3c6ebe37550ab100979eaa5371e87e14611699a023cc3b';
+//   const proof = [
+//     '395301e5eea92fe2d042469a3d591e8a9b60be83b3671b9bdccae5b5a1333487',
+//     'a9255facf82dfdc7587f1acb32584631bc451b8681c289c920946786810d11ff',
+//     'e05363877cfd6b974c1c61c11a1c90b6f5ee9f8f3858d0536ec5cde262f6012a',
+//     'd34fb57f4fdf3dbbf480ca3dcf445a3286505bab22addba8cf3261ce85fa59ce',
+//     '702f8ec43029a165df18b6a49df18ac40710ec1683394af11d457078c0ac78d7',
+//     '54d7a4efd03fabac46616afc953f39103b27a9817dc78ac78537ab050f0ba143',
+//     '27c1a815457aba1d0fe070a064c8e66002f4c76dbdb7be668f6fc50ce27c7e47',
+//     'd3b9118364345043f1b374da688878ee01ecb4035710bfa1638bc2d5baa328e4',
+//   ];
+
+//   const address = 'cosmos1rsffgqju8cuvrnvvxk2yw2q0ylwzk8mg6ly4gw';
+//   const actual = verify(treeRoot)(proof, { address, amount: 2000 });
+
+//   await t.deepEqual(
+//     actual,
+//     true,
+//     'verify function should return true for a valid address.',
+//   );
+// });
+
 const makePrivatePowers = (o = {}) => ({
   marshaller: Far('fake marshaller', { ...makeFakeMarshaller() }),
   storageNode: makeFakeStorageKit('governedPsmTest').rootNode,
@@ -37,19 +106,19 @@ const dummyWallets = [
   'cosmos17w9swykduq93glcx2mldsszulprawretga4sqj',
 ];
 
-const wallets = testWallets.map((x) => x.pubkey);
+const wallets = testWallets.map(x => x.pubkey);
 
 const filename = new URL(import.meta.url).pathname;
 const dirname = path.dirname(filename);
 
-const sourcePath = (file) => dirname.concat(file);
+const sourcePath = file => dirname.concat(file);
 
-const rootContractPath = `${dirname}/../src/contract.js`;
-const prepareAirdrop = `${dirname}/../src/prepareAirdropKit.js`;
+const rootContractPath = `${dirname}/../src/airdrop/contract.js`;
+const prepareAirdrop = `${dirname}/../src/airdrop/prepareAirdropKit.js`;
 
-const createTimerLogger = (logger) => {
+const createTimerLogger = logger => {
   let i = 0;
-  return (value) => {
+  return value => {
     i += 1;
     logger('timer logger:::', { iter: i, value });
     return value;
@@ -60,7 +129,7 @@ const timerLogger = createTimerLogger(console.log);
 
 const timer = buildManualTimer(timerLogger);
 
-const setupPurseNotifier = async (purse) => {
+const setupPurseNotifier = async purse => {
   const notifier = await E(purse).getCurrentAmountNotifier();
   let nextUpdate = E(notifier).getUpdateSince();
   return {
@@ -70,23 +139,46 @@ const setupPurseNotifier = async (purse) => {
       const { value: balance, updateCount } = await nextUpdate;
       console.log('checking notiifer:::', { updateCount, balance });
       nextUpdate = await E(notifier).getUpdateSince(updateCount);
+      console.log('nextUpdate:::', { nextUpdate });
     },
   };
 };
+const makeBundleId = ({ endoZipBase64Sha512 }) => `b1-${endoZipBase64Sha512}`;
 
-test('prepareAirdrop', async (t) => {
+test('prepareAirdrop', async t => {
   const { zoe, vatAdminState } = await setUpZoeForTest();
-  const [mintBundle, airdropBundle] = await Promise.all([
-    bundleSource(prepareAirdrop),
-    bundleSource(prepareAirdrop),
-  ]);
 
-  const airdropInstallation = await E(zoe).install(airdropBundle);
+  const installedBundles = await bootAndInstallBundles(t, bundleRoots);
+  const bundleIds = Object.entries(installedBundles.bundles).map(
+    ([key, val]) => ({ key, bundleId: makeBundleId(val) }),
+  );
 
-  vatAdminState.installBundle('b1-airdrop-kit', airdropBundle);
+  const [postSvcBundle, airdropBundle] = bundleIds;
+
+  console.log(installedBundles, {
+    bundleIds,
+    b: await `b1-${installedBundles.bundles.endoZipBase64Sha512}`,
+  });
+
+  const { airdropCampaign } = installedBundles.bundles;
+
+  const ids = {
+    airdropCampaign: `b1-${airdropCampaign.endoZipBase64Sha512}`,
+  };
+
+  const airdropInstallation = await E(zoe).installBundleID(
+    airdropBundle.bundleId,
+  );
 
   const issuerKit = makeIssuerKit('Airdroplets');
 
+  const airdropIssuerKeywordRecord = harden({
+    Airdroplets: issuerKit.issuer,
+  });
+
+  const contractTerms = {
+    claimWindowTimeframe: 86400n * 28n,
+  };
   const defaultPrivateArgs = {
     claimPeriodEndTime: oneDay * 28, // 4 Weeks
     tokenBrand: issuerKit.brand,
@@ -101,30 +193,24 @@ test('prepareAirdrop', async (t) => {
   const merkleTreeDetails = {
     root: 'bdc991f6708c800b107ff2f9abc9d2ed3ed0a13a1585e31beab7e96fee1b1e95',
   };
-  const proofHolderBehaviors = Far('Proof Holder Powers', {
-    getRoot() {
-      return merkleTreeDetails.root;
-    },
-    hashFn: makeSha256,
-    verificationFunction: () => {
-      /**
-       * verify proof against root.
-       *
-       * (root, [proof] , address?)
-       *
-       */
-      return 'im ready.';
-    },
-  });
+
+  const airdropPurse = issuerKit.issuer.makeEmptyPurse();
+  const airdroplets = (x = 0n) => AmountMath.make(issuerKit.brand, x);
+
+  const TOTAL_AIRDROP_SUPPLY = airdroplets(1_000_000n);
+  await airdropPurse.deposit(issuerKit.mint.mintPayment(TOTAL_AIRDROP_SUPPLY));
+
+  t.deepEqual(airdropPurse.getCurrentAmount(), airdroplets(1_000_000n));
 
   const airdropInstance = await E(zoe).startInstance(
     airdropInstallation,
-    {},
+    airdropIssuerKeywordRecord,
     {
-      proofHolderFacet: proofHolderBehaviors,
+      rootHash: merkleTreeDetails.root,
+      claimWindowLength: 8_640_000n * 28n,
     },
     // @ts-ignore
-    makePrivateArgs({}),
+    makePrivateArgs({ purse: airdropPurse }),
   );
 
   const { creatorFacet, publicFacet } = airdropInstance;
@@ -138,7 +224,10 @@ test('prepareAirdrop', async (t) => {
     AIRDROP_ADMIN_MESSAGES.ADD_ACCOUNTS_SUCCESS(walletData.slice(0, 50)),
   );
 
-  const details = await E(publicFacet).getAirdropTokenDetails();
+  const { brand: airdropBrand, issuer } = issuerKit;
+
+  const internalPurse = await E(creatorFacet).getPurse();
+  t.deepEqual(internalPurse.getCurrentAmount(), TOTAL_AIRDROP_SUPPLY);
 
   t.is(
     await E(publicFacet).getTreeRoot(),
@@ -146,27 +235,13 @@ test('prepareAirdrop', async (t) => {
     'public facet should expose a method for obtaining the merkle root',
   );
 
-  t.deepEqual(
-    await E(publicFacet).claimInclusion(
-      'cosmos1p00xhl9ysacadcduxglhavstr8yvh9hfzk6z6w',
-      ['a', 'b', 'c'],
-    ),
-    makeSha256('cosmos1p00xhl9ysacadcduxglhavstr8yvh9hfzk6z6w#'),
-  );
-  const { brand: airdropBrand, issuer } = details;
-
-  const airdroplets = (x = 0n) => AmountMath.make(airdropBrand, x);
   const twoThousandAirdroplets = airdroplets(2000n);
-  const handleMint = (mint) => (amount) => mint.mintPayment(amount);
+  const handleMint = mint => amount => mint.mintPayment(amount);
   const mintAirdropTokenPayment = handleMint(issuerKit.mint);
 
   const initialDeposit = mintAirdropTokenPayment(twoThousandAirdroplets);
-  console.log('TEST EXECUTION :::', { details, issuer });
 
-  t.deepEqual(
-    await details.issuer.getAmountOf(initialDeposit),
-    twoThousandAirdroplets,
-  );
+  t.deepEqual(await issuer.getAmountOf(initialDeposit), twoThousandAirdroplets);
 
   t.deepEqual(
     await E(creatorFacet).depositAirdropPayment(initialDeposit),
@@ -196,7 +271,7 @@ test('prepareAirdrop', async (t) => {
     await E(adminPurse).getCurrentAmount(),
     AmountMath.add(twentyMillionAirdroplets, twoThousandAirdroplets),
   );
-  CLAIM_MESSAGES;
+
   t.throwsAsync(() => E(publicFacet).claim('iamnotavalidpublickey'), {
     message: CLAIM_MESSAGES.INELIGIBLE_ACCOUNT_ERROR,
   });
@@ -229,7 +304,6 @@ test('prepareAirdrop', async (t) => {
 /**
  * Scenarios I need to test for:
  *
- * <Incoming Chat GPT Response>
  *
  *
  * Merkle Root

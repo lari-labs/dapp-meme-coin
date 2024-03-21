@@ -1,21 +1,21 @@
-# Agoric Airdrop Factory
+# [ERTP](https://github.com/Agoric/agoric-sdk/tree/master/packages/ERTP) Airdrop Campaign
 
 ## Getting started 
 
 ```bash
 # clone repo
-$ git clone https://github.com/lari-labs/dapp-meme-coin && cd dapp-meme-coin
+$ git clone https://github.com/lari-labs/dapp-ertp-airdrop && cd dapp-ertp-airdrop
 # install deps
-$ dapp-meme-coin ## agoric install
+$ ./dapp-ertp-airdrop ## agoric install
 ```
 
 ### Running tests
 
 ```bash
 # cd into contract
-cd contract
+cd ./dapp-ertp-airdrop/contract
 # run all tests
-$ contract ## yarn run test
+$ ./dapp-ertp-airdrop/contract $ yarn run test
 # run specific test
-$ npx ava ./test/<specific-test-file>.js 
+$ ./dapp-ertp-airdrop/contract $ npx ava ./test/<specific-test-file>.js 
 ```
